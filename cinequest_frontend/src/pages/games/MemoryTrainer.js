@@ -64,6 +64,7 @@ function extractChallengingQuestion(round) {
 }
 
 export default function MemoryTrainer() {
+  const MAX_ROUNDS = 18;
   const [region, setRegion] = useState("US");
   const [round, setRound] = useState(null);
   const [showImage, setShowImage] = useState(false);
@@ -76,11 +77,40 @@ export default function MemoryTrainer() {
   const [score, setScore] = useState(0);
   const [played, setPlayed] = useState(0);
   const [recallMeta, setRecallMeta] = useState(null);
+  const [showScore, setShowScore] = useState(false);
 
   const timerRef = useRef();
 
-  // Load a new round (movie + image + question)
-  async function loadRound() {
+  // Helper to reset all gameplay state for replay or region switch
+  function resetGameState(nextRegion = region) {
+    setScore(0);
+    setPlayed(0);
+    setShowScore(false);
+    setErrMsg("");
+    setRecallMeta(null);
+    setAnswered(false);
+    setInput("");
+    setFeedback("");
+    setTimer(TIMER_DISPLAY);
+    setShowImage(false);
+    setRound(null);
+    setLoading(false);
+    // If region is changed, effect below will loadRound automatically
+    if (nextRegion === region) {
+      loadRound(nextRegion, true);
+    }
+  }
+
+  // Load a new round unless max rounds reached or showScore is active
+  async function loadRound(targetRegion = region, force = false) {
+    if (showScore && !force) return;
+    if (played >= MAX_ROUNDS && !force) {
+      setShowScore(true);
+      setRound(null);
+      setShowImage(false);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setErrMsg("");
     setRound(null);
@@ -91,7 +121,7 @@ export default function MemoryTrainer() {
     setTimer(TIMER_DISPLAY);
     setRecallMeta(null);
     try {
-      const res = await getMemoryTrainerRound(region);
+      const res = await getMemoryTrainerRound(targetRegion);
       if (!res) {
         setErrMsg("Couldn't fetch a movie round. Try again?");
         setLoading(false);
@@ -100,7 +130,6 @@ export default function MemoryTrainer() {
       // fetch extra data for more challenging recall, if available (e.g., main actor)
       if (res.movie && !res.movie.genres) {
         // Try to get actual genres and credits for harder question
-        // We will NOT use the year question unless nothing else
         const movieDetails = await fetch(
           `https://api.themoviedb.org/3/movie/${res.movie.id}?api_key=${process.env.REACT_APP_TMDB_API_KEY}&append_to_response=credits`
         ).then(r => r.ok ? r.json() : res.movie).catch(() => res.movie);
@@ -137,15 +166,25 @@ export default function MemoryTrainer() {
     // eslint-disable-next-line
   }, [showImage, round]);
 
-  // New round on mount or region change
+  // On mount or region change, reset to fresh state and load a new round
   useEffect(() => {
-    loadRound();
+    resetGameState(region);
     // eslint-disable-next-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [region]);
+
+  // Whenever showScore changes to false (replay), reset everything and start round 0
+  useEffect(() => {
+    if (!showScore && played === 0 && !round && !loading) {
+      loadRound(region, true);
+    }
+    // eslint-disable-next-line
+  }, [showScore]);
 
   // Answer submission + feedback (only reveal correct answer after submit)
   function handleSubmit(e) {
     e.preventDefault();
+    if (answered || showScore) return;
     setAnswered(true);
     setPlayed((p) => p + 1);
 
@@ -157,10 +196,8 @@ export default function MemoryTrainer() {
     // Keep logic challenging and forgiving:
     if (recallMeta) {
       if (recallMeta.recallType === "director") {
-        // Accept substring or last name, case-insensitive
         correct = expected.toLowerCase().includes(normalizedGuess);
       } else if (recallMeta.recallType === "genre") {
-        // Accept exact genre match (lowercase)
         correct =
           !!(
             round.movie &&
@@ -168,12 +205,10 @@ export default function MemoryTrainer() {
             round.movie.genres.find(g => normalizedGuess === g.name.toLowerCase())
           );
       } else if (recallMeta.recallType === "actor") {
-        // Accept substring or last name, forgiving
         correct = expected.toLowerCase().includes(normalizedGuess);
       } else if (recallMeta.recallType === "year") {
         correct = normalizedGuess === expected.toString();
       } else {
-        // fallback: loose substring match
         correct = expected.toLowerCase().includes(normalizedGuess);
       }
     }
@@ -187,8 +222,19 @@ export default function MemoryTrainer() {
         }`
       );
     }
-    // After feedback, auto-advance
-    setTimeout(loadRound, correct ? 1700 : 2400);
+
+    // If reached max, trigger final screen after feedback, else new round
+    if (played + 1 >= MAX_ROUNDS) {
+      setTimeout(() => {
+        setShowScore(true);
+        setRound(null);
+        setShowImage(false);
+      }, correct ? 1100 : 1700);
+    } else {
+      setTimeout(() => {
+        loadRound();
+      }, correct ? 1300 : 1900);
+    }
   }
 
   // UI styles
@@ -293,6 +339,16 @@ export default function MemoryTrainer() {
       boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
       fontSize: ".98rem",
       textAlign: "center"
+    },
+    scoreScreen: {
+      background: "#edeafa",
+      borderRadius: 15,
+      padding: "34px 12px 28px",
+      boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.08)",
+      textAlign: "center",
+      margin: "38px auto",
+      maxWidth: 370,
+      animation: "fadeInPop 0.5s cubic-bezier(.41,.81,.52,1)",
     }
   };
 
@@ -306,7 +362,7 @@ export default function MemoryTrainer() {
         <button
           className="btn"
           style={styles.btn(region === "US")}
-          onClick={() => { setRegion("US"); setScore(0); setPlayed(0); }}
+          onClick={() => { setRegion("US"); }}
           disabled={region === "US"}
           type="button"
         >
@@ -315,7 +371,7 @@ export default function MemoryTrainer() {
         <button
           className="btn"
           style={styles.btn(region === "IN")}
-          onClick={() => { setRegion("IN"); setScore(0); setPlayed(0); }}
+          onClick={() => { setRegion("IN"); }}
           disabled={region === "IN"}
           type="button"
         >
@@ -323,107 +379,148 @@ export default function MemoryTrainer() {
         </button>
       </div>
       <div style={styles.score}>
-        Score: {score} / {played}
+        Score: {score} / {played} {` (Max: ${MAX_ROUNDS})`}
       </div>
-      {errMsg && <ErrorToast message={errMsg} />}
-      {loading && (
-        <div style={{ margin: "28px 0 22px", textAlign: "center" }}>
-          <Loader size={34} />
+      {showScore ? (
+        <div
+          style={styles.scoreScreen}
+          className="subtle-pop"
+          aria-label="Quiz End Score"
+        >
+          <div
+            style={{
+              fontSize: "1.47rem",
+              fontWeight: 900,
+              color: "#973caa",
+              letterSpacing: ".012em",
+              marginBottom: 5,
+            }}
+          >
+            🎉 Session Complete!
+          </div>
+          <div style={{ fontWeight: 700, color: "#763195", fontSize: "1.17rem", margin: "8px 0" }}>
+            Final Score: <span style={{ color: "#24974e" }}>{score}</span> / {MAX_ROUNDS}
+          </div>
+          <div style={{ margin: "8px 0 19px", color: "#8e83a2", fontSize: ".99rem" }}>
+            {score === MAX_ROUNDS
+              ? "Amazing – perfect memory!"
+              : score >= 13
+              ? "Great recall – you know your cinema!"
+              : score >= 7
+              ? "Nice job! Try again for more detail."
+              : "Keep practicing for a higher score!"}
+          </div>
+          <button
+            className="btn btn-large"
+            style={{ fontWeight: 700, marginBottom: 7, fontSize: "1.14rem" }}
+            onClick={() => resetGameState(region)}
+          >
+            Play Again
+          </button>
         </div>
-      )}
-      {!loading && round && (
+      ) : (
         <>
-          {showImage ? (
-            <div style={styles.imageBox}>
-              <img
-                src={round.imageUrl}
-                alt="Movie still"
-                style={styles.movieImg}
-                draggable={false}
-              />
-              <div style={styles.timerBar}>
-                <div style={styles.timerFill}></div>
-              </div>
-              <div
-                style={{
-                  color: "#a58cc2",
-                  fontSize: ".99rem",
-                  fontWeight: 600,
-                  marginTop: 8,
-                  letterSpacing: ".01em"
-                }}
-              >
-                Memorize every detail... Question in <span style={{color:"#973caa", fontWeight:700}}>{timer}s</span>!
-              </div>
+          {errMsg && <ErrorToast message={errMsg} />}
+          {loading && (
+            <div style={{ margin: "28px 0 22px", textAlign: "center" }}>
+              <Loader size={34} />
             </div>
-          ) : (
+          )}
+          {!loading && round && (
             <>
-              <div style={styles.question}>
-                {recallMeta ? recallMeta.recallQ : "Recall a key detail about the movie you just saw."}
-              </div>
-              <form style={styles.ansForm} onSubmit={handleSubmit} autoComplete="off">
-                <input
-                  className="input"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  autoFocus
-                  placeholder={recallMeta ? recallMeta.placeholder : ""}
-                  disabled={answered}
-                  style={{
-                    width: 190,
-                    maxWidth: 260,
-                    fontWeight: 590,
-                    fontSize: "1.10rem",
-                  }}
-                  aria-label="Your answer"
-                />
-                <button
-                  className="btn"
-                  type="submit"
-                  disabled={answered}
-                  style={{ padding: "10px 22px", fontWeight: 700 }}
-                >
-                  {answered ? "✓" : "Submit"}
-                </button>
-              </form>
-              {/* Only show feedback and correct answer after user submits */}
-              {answered ? (
-                <div
-                  className="subtle-pop"
-                  style={{
-                    color: feedback.startsWith("🎉")
-                      ? "#24974e"
-                      : "#db3662",
-                    fontWeight: 700,
-                    fontSize: "1.14rem",
-                    textAlign: "center",
-                    minHeight: 28,
-                    marginTop: 9,
-                    letterSpacing: ".007em"
-                  }}
-                  aria-live="polite"
-                >
-                  {feedback}
+              {showImage ? (
+                <div style={styles.imageBox}>
+                  <img
+                    src={round.imageUrl}
+                    alt="Movie still"
+                    style={styles.movieImg}
+                    draggable={false}
+                  />
+                  <div style={styles.timerBar}>
+                    <div style={styles.timerFill}></div>
+                  </div>
+                  <div
+                    style={{
+                      color: "#a58cc2",
+                      fontSize: ".99rem",
+                      fontWeight: 600,
+                      marginTop: 8,
+                      letterSpacing: ".01em"
+                    }}
+                  >
+                    Memorize every detail... Question in <span style={{color:"#973caa", fontWeight:700}}>{timer}s</span>!
+                  </div>
                 </div>
               ) : (
-                <div style={styles.reveal}>
-                  <span style={{ fontStyle: "italic", color: "#b7a2cf" }}>
-                    Hint: Recall details from the image!
-                  </span>
-                </div>
+                <>
+                  <div style={styles.question}>
+                    {recallMeta ? recallMeta.recallQ : "Recall a key detail about the movie you just saw."}
+                  </div>
+                  <form style={styles.ansForm} onSubmit={handleSubmit} autoComplete="off">
+                    <input
+                      className="input"
+                      value={input}
+                      onChange={e => setInput(e.target.value)}
+                      autoFocus
+                      placeholder={recallMeta ? recallMeta.placeholder : ""}
+                      disabled={answered}
+                      style={{
+                        width: 190,
+                        maxWidth: 260,
+                        fontWeight: 590,
+                        fontSize: "1.10rem",
+                      }}
+                      aria-label="Your answer"
+                    />
+                    <button
+                      className="btn"
+                      type="submit"
+                      disabled={answered}
+                      style={{ padding: "10px 22px", fontWeight: 700 }}
+                    >
+                      {answered ? "✓" : "Submit"}
+                    </button>
+                  </form>
+                  {/* Only show feedback and correct answer after user submits */}
+                  {answered ? (
+                    <div
+                      className="subtle-pop"
+                      style={{
+                        color: feedback.startsWith("🎉")
+                          ? "#24974e"
+                          : "#db3662",
+                        fontWeight: 700,
+                        fontSize: "1.14rem",
+                        textAlign: "center",
+                        minHeight: 28,
+                        marginTop: 9,
+                        letterSpacing: ".007em"
+                      }}
+                      aria-live="polite"
+                    >
+                      {feedback}
+                    </div>
+                  ) : (
+                    <div style={styles.reveal}>
+                      <span style={{ fontStyle: "italic", color: "#b7a2cf" }}>
+                        Hint: Recall details from the image!
+                      </span>
+                    </div>
+                  )}
+                  <div style={styles.titleBox}>
+                    <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
+                    {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
+                  </div>
+                </>
               )}
-              <div style={styles.titleBox}>
-                <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
-                {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
-              </div>
             </>
           )}
+          {!loading && !round && !errMsg && (
+            <div style={{ margin: "20px 0", color: "#c75e77" }}>
+              Oops, unable to load a round. <button className="btn" onClick={() => loadRound(region, true)}>Retry</button>
+            </div>
+          )}
         </>
-      )}
-      {!loading && !round && !errMsg && (
-        <div style={{ margin: "20px 0", color: "#c75e77" }}>
-          Oops, unable to load a round. <button className="btn" onClick={loadRound}>Retry</button>
-        </div>
       )}
       <div style={{ marginTop: 26, color: "#a58cc2", textAlign: "center", fontWeight: 500, fontSize: ".98rem", letterSpacing: ".008em" }}>
         Glimpse a random movie image for 5 seconds, then prove your recall! We’ll grill you on main actor, genre, director or another tricky detail.
