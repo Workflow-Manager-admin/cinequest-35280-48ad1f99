@@ -6,13 +6,11 @@ import { fetchMoviesByRegion } from "../../tmdbApi";
 import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
-// MovieDialogueQuiz - TMDB-powered multiple-choice quiz with enhanced clue logic:
-// - Avoid clues that reveal movie/character names or spoil the main plot
-// - Prefers taglines/keywords/filtered overview from TMDB via API
-// - Redacts forbidden terms in clues for challenging gameplay
+// MovieDialogueQuiz - very first CineQuest working version: basic Hollywood/Kollywood region selection, fetches a random movie and quizzes on its tagline (or overview).
+// Multiple-choice with three decoys and answer always shown after guess; minimal clue redaction, minimal error handling.
 
 export default function MovieDialogueQuiz() {
-  const MAX_QUESTIONS = 18;
+  const MAX_QUESTIONS = 10;
   const [region, setRegion] = useState("US");
   const [round, setRound] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -23,115 +21,47 @@ export default function MovieDialogueQuiz() {
   const [played, setPlayed] = useState(0);
   const [showScore, setShowScore] = useState(false); // End-of-session score screen
 
-  // Helper: redact forbidden terms (movie title/keywords) in clue
-  function redactClue(text, forbidden) {
-    if (!text || !forbidden || !forbidden.length) return text;
-    let clue = text;
-    forbidden.forEach(term => {
-      if (term && term.length > 1) {
-        const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "gi");
-        clue = clue.replace(regex, "_____");
-      }
-    });
-    return clue;
-  }
-
-  // Helper: get keywords and details from TMDB for improved clues
-  async function fetchExtraClues(mid) {
-    try {
-      // Get details (tagline, overview)
-      const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${mid}?api_key=${process.env.REACT_APP_TMDB_API_KEY}`);
-      const details = await detailRes.json();
-      // Get keywords
-      const keywordsRes = await fetch(`https://api.themoviedb.org/3/movie/${mid}/keywords?api_key=${process.env.REACT_APP_TMDB_API_KEY}`);
-      const kwJson = await keywordsRes.json();
-      let keywords = [];
-      if (kwJson && (Array.isArray(kwJson.keywords) || Array.isArray(kwJson.results))) {
-        // TMDB uses .keywords or .results
-        keywords = kwJson.keywords || kwJson.results || [];
-      }
-      return {
-        tagline: details.tagline || "",
-        overview: details.overview || "",
-        keywords: (keywords || []).map(k => k.name).filter(Boolean),
-      };
-    } catch {
-      return { tagline: "", overview: "", keywords: [] };
+  // Fisher-Yates shuffle
+  function shuffleArray(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
     }
+    return a;
   }
 
-  // Quiz round generator with advanced clue logic
+  // Quiz round generator with basic clue logic (first working version)
   async function getRandomQuizRound(region = "US", decoyCount = 3) {
     let tries = 0;
     let movie = null;
-    let details = null;
-    // Try to fetch a random movie with a tagline, overview, or keywords
-    while (!movie && tries < 8) {
+    // Try to fetch a random movie with a tagline or overview
+    while (!movie && tries < 5) {
       try {
-        const page = 1 + Math.floor(Math.random() * 5);
+        const page = 1 + Math.floor(Math.random() * 4);
         const res = await fetchMoviesByRegion(region, { page });
         if (!res || !res.results) break;
-        // Robust filter: for region "IN", only Tamil
         const candidates = res.results.filter(
           (m) =>
             m &&
-            m.title && m.id &&
-            (
-              (typeof m.tagline === "string" && m.tagline.length > 10) ||
-              (typeof m.overview === "string" && m.overview.length > 20) ||
-              (typeof m.id === "number")
-            ) &&
-            m.title.length > 3 &&
-            (region !== "IN" || m.original_language === "ta")
+            m.title &&
+            (typeof m.tagline === "string" && m.tagline.length > 8) ||
+            (typeof m.overview === "string" && m.overview.length > 25)
         );
         if (candidates.length === 0) {
           tries++;
           continue;
         }
         movie = candidates[Math.floor(Math.random() * candidates.length)];
-        details = await fetchExtraClues(movie.id);
       } catch {
-        break;
+        tries++;
+        continue;
       }
-      tries++;
     }
     if (!movie) return null;
-
-    // Clue filtering: block movie name and keywords
-    let forbidden = [movie.title, movie.original_title, ...(details && details.keywords ? details.keywords : [])];
-
-    // Clue selection preference: tagline > non-forbidden keyword > overview > fallback
-    let candidates = [];
-    if (details && details.tagline && details.tagline.length > 10) {
-      candidates.push(details.tagline);
-    }
-    if (details && details.keywords && details.keywords.length > 0) {
-      details.keywords.forEach(k => {
-        if (!forbidden.some(ft => ft && k && ft.toLowerCase() === k.toLowerCase()))
-          candidates.push(k);
-      });
-    }
-    if (details && details.overview && details.overview.length > 20) {
-      candidates.push(details.overview);
-    }
-    if (movie.tagline && movie.tagline.length > 10) candidates.push(movie.tagline);
-    if (movie.overview && movie.overview.length > 20) candidates.push(movie.overview);
-
-    // Exclude clues with forbidden terms (case insensitive)
-    function clueAcceptable(clue) {
-      if (!clue) return false;
-      const lowered = clue.toLowerCase();
-      return !forbidden.some(t => !!t && t.length > 1 && lowered.includes(t.toLowerCase()));
-    }
-    let clue = candidates.find(clueAcceptable);
-
-    // If no clue passes, redact the forbidden terms in the first candidate
-    if (!clue && candidates.length) {
-      clue = redactClue(candidates[0], forbidden);
-    }
-    if (!clue) clue = "Guess the movie based on this mysterious clue!";
-
-    // Fetch decoy (incorrect) movies
+    // Choose clue (prefer tagline, fallback to overview)
+    let clue = movie.tagline && movie.tagline.length > 8 ? movie.tagline : (movie.overview || "Guess the movie!");
+    // Get decoy movies
     let decoys = [];
     let decoyAttempts = 0;
     while (decoys.length < decoyCount && decoyAttempts < 8) {
@@ -155,23 +85,12 @@ export default function MovieDialogueQuiz() {
       }
       decoyAttempts++;
     }
-    // Shuffle answers
-    const allChoices = shuffleArray([movie, ...decoys.slice(0, decoyCount)]);
+    const choices = shuffleArray([movie, ...decoys.slice(0, decoyCount)]);
     return {
       text: clue,
       answer: movie,
-      choices: allChoices,
+      choices,
     };
-  }
-
-  // Fisher-Yates shuffle
-  function shuffleArray(arr) {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
   }
 
   // Fetch new quiz question
@@ -199,6 +118,9 @@ export default function MovieDialogueQuiz() {
 
   // Load new round on region switch/mount
   useEffect(() => {
+    setScore(0);
+    setPlayed(0);
+    setShowScore(false);
     loadRound();
     // eslint-disable-next-line
   }, [region]);
@@ -206,65 +128,43 @@ export default function MovieDialogueQuiz() {
   // User choice handler
   function handleChoose(movie) {
     if (selected || showScore) return;
-
     setSelected(movie);
-
-    // Only increment played (i.e. question number) if we have not reached the max
-    if (played < MAX_QUESTIONS) {
-      setPlayed((p) => p + 1);
-    }
-
-    // Determine if this is the final question
-    const nextPlayed = played + 1;
-    const isFinal = nextPlayed >= MAX_QUESTIONS;
-
     if (movie.id === round.answer.id) {
       setScore((s) => s + 1);
       setFeedback("correct");
-      if (isFinal) {
-        setTimeout(() => {
-          setShowScore(true);
-          setRound(null);
-        }, 650);
-      } else {
-        setTimeout(() => {
-          loadRound();
-        }, 850);
-      }
     } else {
       setFeedback("wrong");
-      if (isFinal) {
-        setTimeout(() => {
-          setShowScore(true);
-          setRound(null);
-        }, 900);
-      } else {
-        setTimeout(() => {
-          loadRound();
-        }, 1200);
-      }
     }
+    setPlayed((p) => p + 1);
+    setTimeout(() => {
+      if (played + 1 >= MAX_QUESTIONS) {
+        setShowScore(true);
+        setRound(null);
+      } else {
+        loadRound();
+      }
+    }, 850);
   }
 
   // UI styles
   const styles = {
     container: {
-      maxWidth: 550,
+      maxWidth: 500,
       margin: "46px auto 0",
       background: "#fff",
-      borderRadius: 22,
-      boxShadow: "0 6px 28px 0 rgba(151,60,170,.082)",
-      padding: "38px 18px 32px",
-      minHeight: 330,
+      borderRadius: 18,
+      boxShadow: "0 6px 28px 0 rgba(151,60,170,0.09)",
+      padding: "33px 16px 26px",
+      minHeight: 300,
       animation: "fadeInPop 0.5s"
     },
     quote: {
       color: "#481d77",
-      fontSize: "1.16rem",
+      fontSize: "1.10rem",
       background: "#edeafa",
       borderRadius: 12,
-      padding: "14px 19px",
-      margin: "0 0 18px",
+      padding: "13px 16px",
+      margin: "0 0 15px",
       fontWeight: 600,
       boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.08)",
       letterSpacing: ".007em"
@@ -280,7 +180,7 @@ export default function MovieDialogueQuiz() {
     regionBar: {
       display: "flex",
       gap: 10,
-      marginBottom: 16,
+      marginBottom: 12,
       marginTop: 2
     },
     btn: (isActive) => ({
@@ -296,14 +196,11 @@ export default function MovieDialogueQuiz() {
     score: {
       fontWeight: 700,
       color: "#973caa",
-      fontSize: "1.04rem",
+      fontSize: "1.01rem",
       margin: "0 0 12px",
       letterSpacing: ".009em"
     }
   };
-
-  const posterUrl = (poster) =>
-    poster ? `https://image.tmdb.org/t/p/w185${poster}` : null;
 
   return (
     <div className="game-container" style={styles.container}>
@@ -315,15 +212,7 @@ export default function MovieDialogueQuiz() {
         <button
           className="btn"
           style={styles.btn(region === "US")}
-          onClick={() => {
-            setRegion("US");
-            setScore(0);
-            setPlayed(0);
-            setShowScore(false);
-            setSelected(null);
-            setFeedback(null);
-            loadRound();
-          }}
+          onClick={() => { setRegion("US"); }}
           disabled={region === "US"}
           type="button"
         >
@@ -332,15 +221,7 @@ export default function MovieDialogueQuiz() {
         <button
           className="btn"
           style={styles.btn(region === "IN")}
-          onClick={() => {
-            setRegion("IN");
-            setScore(0);
-            setPlayed(0);
-            setShowScore(false);
-            setSelected(null);
-            setFeedback(null);
-            loadRound();
-          }}
+          onClick={() => { setRegion("IN"); }}
           disabled={region === "IN"}
           type="button"
         >
@@ -348,19 +229,18 @@ export default function MovieDialogueQuiz() {
         </button>
       </div>
       <div style={styles.score}>
-        Score: {score} / {played}
-        {` (Max: ${MAX_QUESTIONS})`}
+        Score: {score} / {played} {`(Max: ${MAX_QUESTIONS})`}
       </div>
       {showScore ? (
         <div
           style={{
             background: "#edeafa",
-            borderRadius: 15,
+            borderRadius: 12,
             padding: "31px 13px 25px",
             boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.09)",
             textAlign: "center",
             margin: "35px auto 12px",
-            maxWidth: 370,
+            maxWidth: 340,
             animation: "fadeInPop 0.54s cubic-bezier(.41,.81,.52,1)",
           }}
           className="subtle-pop"
@@ -368,7 +248,7 @@ export default function MovieDialogueQuiz() {
         >
           <div
             style={{
-              fontSize: "1.51rem",
+              fontSize: "1.36rem",
               fontWeight: 900,
               color: "#973caa",
               letterSpacing: ".013em",
@@ -377,21 +257,12 @@ export default function MovieDialogueQuiz() {
           >
             🎉 Quiz Complete!
           </div>
-          <div style={{ fontWeight: 700, color: "#763195", fontSize: "1.19rem", margin: "10px 0" }}>
+          <div style={{ fontWeight: 700, color: "#763195", fontSize: "1.13rem", margin: "8px 0" }}>
             Final Score: <span style={{ color: "#24974e" }}>{score}</span> / {MAX_QUESTIONS}
-          </div>
-          <div style={{ margin: "7px 0 20px", color: "#8e83a2", fontSize: ".99rem" }}>
-            {score === MAX_QUESTIONS
-              ? "Perfect score – You're a movie quote genius!"
-              : score >= 13
-              ? "Awesome! You really know your movies."
-              : score >= 7
-              ? "Solid job! Keep watching more films!"
-              : "Give it another try for a higher score."}
           </div>
           <button
             className="btn btn-large"
-            style={{ fontWeight: 700, marginBottom: 7, marginTop: 8, fontSize: "1.14rem" }}
+            style={{ fontWeight: 700, marginBottom: 7, marginTop: 8, fontSize: "1.06rem" }}
             onClick={() => {
               setScore(0);
               setPlayed(0);
@@ -416,7 +287,7 @@ export default function MovieDialogueQuiz() {
           )}
           {!loading && round && (
             <div>
-              <div style={styles.quote} aria-label="Movie quote/clue">
+              <div style={styles.quote} aria-label="Movie clue">
                 &ldquo;{round.text}&rdquo;
               </div>
               <div style={styles.choicesRow}>
@@ -426,16 +297,8 @@ export default function MovieDialogueQuiz() {
                   return (
                     <GameCard
                       key={movie.id}
-                      movie
-                      // Kollywood: show Romanized title for choices
-                      title={
-                        region === "IN"
-                          ? require("../../tamilTransliterator").getKollywoodDisplayAnswer(movie)
-                          : movie.title
-                      }
-                      description={movie.release_date ? movie.release_date.slice(0,4) : ""}
-                      poster={posterUrl(movie.poster_path)}
-                      year=""
+                      title={movie.title}
+                      description={movie.release_date ? movie.release_date.slice(0, 4) : ""}
                       onClick={() => handleChoose(movie)}
                       style={{
                         opacity: selected && !isAnswer && !wrong ? 0.65 : 1,
@@ -455,25 +318,21 @@ export default function MovieDialogueQuiz() {
                   style={{
                     color: feedback === "correct" ? "#2e9245" : "#db3662",
                     fontWeight: 700,
-                    fontSize: "1.13rem",
+                    fontSize: "1.08rem",
                     textAlign: "center",
                     marginTop: 7,
                     marginBottom: 2,
-                    minHeight: 24,
+                    minHeight: 22,
                     letterSpacing: ".007em"
                   }}
                 >
                   {feedback === "correct"
                     ? "🎉 Correct!"
-                    : `❌ Wrong!`}
+                    : `❌ Wrong! The answer was ${round.answer.title}`}
                 </div>
               )}
-              {/* Answer revealed only if 'Reveal Answer' is triggered */}
-              {selected && feedback !== "correct" && feedback !== "wrong" && round && (
-                <></>
-              )}
               <div style={{ marginTop: 14, color: "#a58cc2", fontSize: ".99rem", textAlign: "center" }}>
-                {played < MAX_QUESTIONS
+                {played + 1 <= MAX_QUESTIONS
                   ? `Question ${played + 1} of ${MAX_QUESTIONS}`
                   : `Quiz Complete`}
               </div>
@@ -481,6 +340,16 @@ export default function MovieDialogueQuiz() {
           )}
         </>
       )}
+      <div style={{
+        marginTop: 18,
+        color: "#a58cc2",
+        textAlign: "center",
+        fontWeight: 500,
+        fontSize: ".98rem",
+        letterSpacing: ".008em"
+      }}>
+        Guess the movie title from the clue. First version (CineQuest delivery).
+      </div>
     </div>
   );
 }
