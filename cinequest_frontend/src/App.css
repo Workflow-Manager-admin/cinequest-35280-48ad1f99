@@ -1,24 +1,61 @@
+/* 
+  === CineQuest Modern Theme and UI System ===
+  - Clean, light, and responsive. 
+  - Brand colors: #973caa (primary purple), #f9f9fb (light bg), #151414 (dark accent),
+  - Animations, cards, header, nav, typography, buttons, form, error toast, illustration, mobile.
+  - Google Fonts: Inter, Nunito Sans
+*/
+
+/* Brand color palette */
 :root {
-  --base-light: #00ffff;
-  --base-dark: #00008b;
-  --text-color: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.7);
-  --border-color: rgba(255, 255, 255, 0.1);
+  --primary: #973caa;
+  --primary-rgb: 151, 60, 170;
+  --primary-dark: #763195;
+  --secondary-bg: #f9f9fb;
+  --accent: #151414;
+  --grey: #e3e2e8;
+  --text-main: #151414;
+  --text-light: #333;
+  --header-shadow: 0 2px 12px rgba(151,60,170,0.07);
+
+  --card-shadow: 0 4px 28px 0 rgba(42, 21, 54, 0.09), 0 1.5px 4px 0 rgba(150,50,180,0.08);
+  --card-hover-shadow: 0 6px 34px 0 rgba(151,60,170,0.15), 0 1.5px 8px 0 rgba(150,50,180,0.14);
+  --focus-ring: 0 0 0 3px rgba(151,60,170,0.18);
+  --border: #e7e3f3;
+  --error-bg: #ffe8ee;
+  --error-text: #aa1645;
+  --success-bg: #edfbe9;
 }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Nunito+Sans:wght@400;700&display=swap');
 
 body {
   margin: 0;
-  font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif;
-  background-color: var(--base-dark);
-  color: var(--text-color);
+  font-family: 'Inter', 'Nunito Sans', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+  background: var(--secondary-bg);
+  color: var(--text-main);
+  min-height: 100vh;
+  font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Scrollbar styling */
+body::-webkit-scrollbar {
+  width: 9px;
+}
+body::-webkit-scrollbar-thumb {
+  background: #e6d4f4;
+  border-radius: 8px;
+}
+
+/* App container */
 .app {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--secondary-bg);
+  padding-top: 64px;
 }
 
 .navbar {
