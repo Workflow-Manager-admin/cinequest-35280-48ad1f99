@@ -55,7 +55,14 @@ export async function fetchMoviesByRegion(region, options = {}) {
   if (!response.ok) {
     throw new Error(`TMDB API error (${response.status}): ${response.statusText}`);
   }
-  return await response.json();
+  // Always exclude "Anagarigam" from Kollywood (region IN), case-ignoring, before returning
+  const data = await response.json();
+  if (region === "IN" && data && Array.isArray(data.results)) {
+    data.results = data.results.filter(
+      movie => !movie.title || movie.title.trim().toLowerCase() !== "anagarigam"
+    );
+  }
+  return data;
 }
 
 /**

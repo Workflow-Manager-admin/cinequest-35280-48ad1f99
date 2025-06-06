@@ -21,8 +21,16 @@ async function getStrictObjectCluesRound(region = "US") {
     if (!resp.ok) return null;
     const data = await resp.json();
     if (data && Array.isArray(data.results) && data.results.length) {
-      // Filter only movies with poster for UX
-      const filtered = data.results.filter(m => !!m.poster_path && m.title);
+      // Filter only movies with poster for UX and remove Kollywood "Anagarigam"
+      const filtered = data.results.filter(
+        m =>
+          !!m.poster_path &&
+          m.title &&
+          !(
+            region === "IN" &&
+            m.title.trim().toLowerCase() === "anagarigam"
+          )
+      );
       if (filtered.length) {
         return filtered[Math.floor(Math.random() * filtered.length)];
       }

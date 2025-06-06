@@ -43,7 +43,7 @@ export async function getPopularActors(region = "US", opts = {}) {
 export async function getMoviesWithBothActors(actorId1, actorId2, region = "US") {
   // Fetch movies for actor1, filter by movies also with actor2's id in credits
   // TMDB workaround: first fetch credits for actor1, get film IDs, then compare with actor2's credits
-  
+
   const fetchCredits = async (personId) => {
     const url = `https://api.themoviedb.org/3/person/${personId}/movie_credits?api_key=${process.env.REACT_APP_TMDB_API_KEY}`;
     const response = await fetch(url);
@@ -141,11 +141,23 @@ export async function getMemoryTrainerRound(region = "US") {
   let movie = null;
   let tries = 0;
   while (!movie && tries < 7) {
-    [movie] = await getRandomMovies(region, 1);
+    // Pull candidates, filter out "Anagarigam" if Kollywood/Tamil
+    let [candidateMovie] = await getRandomMovies(region, 1);
     if (
-      movie &&
-      (movie.backdrop_path || movie.poster_path)
+      candidateMovie &&
+      region === "IN" &&
+      candidateMovie.title &&
+      candidateMovie.title.trim().toLowerCase() === "anagarigam"
     ) {
+      // skip and continue searching
+      tries++;
+      continue;
+    }
+    if (
+      candidateMovie &&
+      (candidateMovie.backdrop_path || candidateMovie.poster_path)
+    ) {
+      movie = candidateMovie;
       break;
     }
     tries++;
@@ -225,6 +237,17 @@ export async function getObjectGuessRound(region="US") {
   let tries = 0;
   while (!movie && tries < 7) {
     [movie] = await getRandomMovies(region, 1);
+    // Apply same Kollywood "Anagarigam" filter just in case
+    if (
+      movie &&
+      region === "IN" &&
+      movie.title &&
+      movie.title.trim().toLowerCase() === "anagarigam"
+    ) {
+      movie = null;
+      tries++;
+      continue;
+    }
     if (movie) break;
     tries++;
   }
