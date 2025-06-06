@@ -76,7 +76,6 @@ export default function MovieIQChallenge() {
   const [played, setPlayed] = useState(0);
   const [usedMovieIds, setUsedMovieIds] = useState([]);
   const [showScore, setShowScore] = useState(false);
-  const [showAnswer, setShowAnswer] = useState(false);
   const tryingRef = useRef(false);
 
   // Loads new round, stopping at end
@@ -84,7 +83,6 @@ export default function MovieIQChallenge() {
     if (tryingRef.current) return;
     tryingRef.current = true;
 
-    setShowAnswer(false);
     setLoading(true);
     setErrMsg("");
     setRound(null);
@@ -211,7 +209,6 @@ export default function MovieIQChallenge() {
     setErrMsg("");
     setRound(null);
     setChoices([]);
-    setShowAnswer(false);
     loadRound();
   }
 
@@ -453,31 +450,8 @@ export default function MovieIQChallenge() {
                     : `❌ Wrong!`}
                 </div>
               )}
-              {/* Reveal Answer (never shown by default or after wrong/correct, only if user clicks) */}
+              {/* Reveal answer IMMEDIATELY after selection (pre-reveal-button logic) */}
               {selected && (
-                <button
-                  type="button"
-                  style={{
-                    background: "#fffdfa",
-                    border: "1.4px dashed #c8b9db",
-                    color: "#973caa",
-                    padding: "7px 13px",
-                    borderRadius: 12,
-                    fontWeight: 700,
-                    fontSize: ".98rem",
-                    marginTop: 13,
-                    marginBottom: 8,
-                    cursor: "pointer",
-                    textDecoration: "underline"
-                  }}
-                  onClick={() => setShowAnswer(true)}
-                  disabled={showAnswer}
-                  aria-label="Reveal Movie Title"
-                >
-                  {showAnswer ? "Revealed" : "Reveal Answer"}
-                </button>
-              )}
-              {showAnswer && selected && (
                 <div
                   style={{
                     background: "#edeafa",
