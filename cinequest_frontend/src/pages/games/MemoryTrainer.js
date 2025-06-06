@@ -4,9 +4,9 @@ import ErrorToast from "../../components/ErrorToast";
 import { getMemoryTrainerRound } from "../../tmdbGameUtils";
 
 // PUBLIC_INTERFACE
-// MemoryTrainer - lively game mode where the user views a movie still for 5 seconds and then answers a recall question about it (year, director, or genre).
+// MemoryTrainer - lively game mode where the user views a movie still for 5 seconds and then answers a recall question about it (year, actor, or genre).
 
-const TIMER_DISPLAY = 5; // seconds to show the image
+const TIMER_DISPLAY = 5; // seconds to show image before quiz
 
 export default function MemoryTrainer() {
   const [region, setRegion] = useState("US");
@@ -74,7 +74,7 @@ export default function MemoryTrainer() {
     // eslint-disable-next-line
   }, [region]);
 
-  // Submit answer/reveal
+  // Answer submission + feedback
   function handleSubmit(e) {
     e.preventDefault();
     setAnswered(true);
@@ -89,29 +89,37 @@ export default function MemoryTrainer() {
       const answerLower = (round.answer || "").toLowerCase();
       correct = answerLower.includes(normalizedGuess);
     } else if (round.recallType === "genre") {
-      const genres = ((round.movie.genre_ids && Array.isArray(round.movie.genre_ids)) ? (round.movie.genre_ids.join(",") || "") : "") + ((round.movie.genres && Array.isArray(round.movie.genres)) ? (round.movie.genres.map(g=>g.name).join(",").toLowerCase()) : "");
-      correct = genres.includes(normalizedGuess);
+      // Accept single genre match
+      if (round.movie && round.movie.genres) {
+        correct = !!round.movie.genres.find(
+          (g) => normalizedGuess === g.name.toLowerCase()
+        );
+      } else if (round.movie && round.movie.genre_ids) {
+        // Not ideal, fallback: accept comma or space separated numbers if user is advanced
+        correct = round.movie.genre_ids.join(",").includes(normalizedGuess);
+      }
     }
     if (correct) {
       setFeedback("🎉 Correct!");
       setScore((s) => s + 1);
     } else {
-      setFeedback(`❌ Wrong! Correct: ${round.answer}`);
+      setFeedback(`❌ Wrong! Correct answer: ${round.answer}`);
     }
-    setTimeout(loadRound, 2100);
+    // After feedback, auto-advance
+    setTimeout(loadRound, correct ? 1600 : 2100);
   }
 
   // UI styles
   const styles = {
     container: {
-      maxWidth: 520,
+      maxWidth: 530,
       margin: "46px auto 0",
       background: "#fff",
       borderRadius: 22,
-      boxShadow: "0 6px 28px 0 rgba(151,60,170,.10)",
+      boxShadow: "0 6px 28px 0 rgba(151,60,170,.12)",
       padding: "36px 16px 32px",
       minHeight: 330,
-      animation: "fadeInPop 0.51s"
+      animation: "fadeInPop 0.5s"
     },
     header: {
       color: "#973caa",
@@ -146,15 +154,15 @@ export default function MemoryTrainer() {
       width: "95%",
       maxWidth: 415,
       borderRadius: 19,
-      boxShadow: "0 3px 22px 0 rgba(151,60,170,0.10)",
+      boxShadow: "0 3px 22px 0 rgba(151,60,170,0.09)",
       marginBottom: 6,
       objectFit: "cover",
       maxHeight: 270,
       background: "#eee",
-      animation: "fadeInPop 0.77s"
+      animation: "fadeInPop 0.8s"
     },
     timerBar: {
-      width: "80%",
+      width: "82%",
       height: 8,
       background: "#edeafa",
       borderRadius: 8,
@@ -226,7 +234,7 @@ export default function MemoryTrainer() {
       {errMsg && <ErrorToast message={errMsg} />}
       {loading && (
         <div style={{ margin: "28px 0 22px", textAlign: "center" }}>
-          <Loader size={32} />
+          <Loader size={34} />
         </div>
       )}
       {!loading && round && (
@@ -245,13 +253,13 @@ export default function MemoryTrainer() {
               <div
                 style={{
                   color: "#a58cc2",
-                  fontSize: ".98rem",
+                  fontSize: ".99rem",
                   fontWeight: 600,
-                  marginTop: 6,
+                  marginTop: 8,
                   letterSpacing: ".01em"
                 }}
               >
-                Remember every detail! Question appears in {timer}s...
+                Memorize every detail... Question in <span style={{color:"#973caa", fontWeight:700}}>{timer}s</span>!
               </div>
             </div>
           ) : (
@@ -273,7 +281,7 @@ export default function MemoryTrainer() {
                       : "Enter a genre (e.g. Drama)"
                   }
                   disabled={answered}
-                  style={{ width: 164, maxWidth: 230, fontWeight: 600, fontSize: "1.09rem" }}
+                  style={{ width: 168, maxWidth: 230, fontWeight: 590, fontSize: "1.09rem" }}
                   aria-label="Your answer"
                 />
                 <button
@@ -293,10 +301,10 @@ export default function MemoryTrainer() {
                       ? "#24974e"
                       : "#db3662",
                     fontWeight: 700,
-                    fontSize: "1.13rem",
+                    fontSize: "1.15rem",
                     textAlign: "center",
                     minHeight: 28,
-                    marginTop: 6,
+                    marginTop: 9,
                     letterSpacing: ".007em"
                   }}
                 >
@@ -306,7 +314,7 @@ export default function MemoryTrainer() {
               {!answered && (
                 <div style={styles.reveal}>
                   <span style={{ fontStyle: "italic", color: "#b7a2cf" }}>
-                    Hint: Think about details from the image you just saw!
+                    Hint: Recall from the image you just saw!
                   </span>
                 </div>
               )}
@@ -318,7 +326,7 @@ export default function MemoryTrainer() {
                   borderRadius: 13,
                   color: "#481d77",
                   fontWeight: 600,
-                  boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.07)",
+                  boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
                   fontSize: ".98rem",
                   textAlign: "center"
                 }}
@@ -332,11 +340,11 @@ export default function MemoryTrainer() {
       )}
       {!loading && !round && !errMsg && (
         <div style={{ margin: "20px 0", color: "#c75e77" }}>
-          Oops, unable to load round. <button className="btn" onClick={loadRound}>Retry</button>
+          Oops, unable to load a round. <button className="btn" onClick={loadRound}>Retry</button>
         </div>
       )}
       <div style={{ marginTop: 26, color: "#a58cc2", textAlign: "center", fontWeight: 500, fontSize: ".98rem", letterSpacing: ".008em" }}>
-        Glimpse a movie image for 5 seconds, then test your memory!
+        Glimpse a random movie image for 5 seconds, then prove your recall!
       </div>
     </div>
   );
