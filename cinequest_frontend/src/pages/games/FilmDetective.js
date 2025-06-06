@@ -622,7 +622,6 @@ export default function FilmDetective() {
                   ? require("../../tamilTransliterator").getKollywoodAnswerRoman(gameState.question.movie)
                   : gameState.question.movieTitle}
               </span>
-              {gameState.question.year ? ` (${gameState.question.year})` : ""}
             </div>
           )}
         </div>

@@ -601,8 +601,7 @@ export default function ObjectMovieGuess() {
                     {region === "IN"
                       ? getKollywoodAnswerRoman(round.movie)
                       : round.movie.title}
-                  </span>{" "}
-                  {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
+                  </span>
                 </div>
               )}
               <div style={{ marginTop: 14, color: "#a58cc2", fontSize: ".99rem", textAlign: "center" }}>
