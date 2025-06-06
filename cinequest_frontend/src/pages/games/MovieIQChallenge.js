@@ -105,7 +105,13 @@ export default function MovieIQChallenge() {
         if (!data || !data.movie || !data.movie.id) break;
       } while (usedMovieIds.includes(data.movie.id) && attempts < 10);
 
-      if (!data || !data.movie || !data.director || !data.movie.title) {
+      if (
+        !data ||
+        !data.movie ||
+        !data.director ||
+        !data.movie.title ||
+        (region === "IN" && data.movie.original_language !== "ta")
+      ) {
         setErrMsg("Could not get a valid movie round. Try again?");
         setLoading(false);
         tryingRef.current = false;
@@ -127,7 +133,8 @@ export default function MovieIQChallenge() {
             m.id !== realMovie.id &&
             !usedMovieIds.includes(m.id) &&
             !decoys.some((d) => d.id === m.id) &&
-            m.title.length > 4
+            m.title.length > 4 &&
+            (region !== "IN" || m.original_language === "ta")
           ) {
             decoys.push(m);
             if (decoys.length === 3) break;

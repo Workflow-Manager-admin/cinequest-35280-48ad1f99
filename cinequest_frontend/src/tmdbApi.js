@@ -36,30 +36,38 @@ function buildUrl(endpoint, params = {}) {
  * @returns {Promise<object>} Movie search results
  */
 export async function fetchMoviesByRegion(region, options = {}) {
-  // Kollywood requires more specificity since TMDB's default language/region for "IN" brings up Bollywood.
-  // We'll use language param plus either genre or with_original_language.
+  // Enhanced: For Kollywood, ensure only Tamil-language movies (original_language: "ta", language: "ta-IN").
+  // Use robust post-filtering to exclude false positives from TMDB.
+  const isKollywood = region === "IN";
   const params = {
     page: options.page || 1,
     region,
     ...(options.query ? { query: options.query } : {}),
     ...(options.year ? { year: options.year } : {}),
-    ...(options.language ? { language: options.language } : {}),
-    ...(region === "US" ? { with_original_language: "en" }
-      : { with_original_language: "ta" }), // "ta" = Tamil
+    ...(isKollywood
+      ? { language: "ta-IN", with_original_language: "ta" }
+      : { language: options.language || "en-US", with_original_language: "en" })
   };
 
-  // TMDB does not have a "kollywood" filter. Using original_language=ta (Tamil) to approximate.
+  // TMDB discover DOES return some non-Tamil films for IN even with strict param, so filter in JS.
   const endpoint = options.query ? "/search/movie" : "/discover/movie";
   const url = buildUrl(endpoint, params);
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`TMDB API error (${response.status}): ${response.statusText}`);
   }
-  // Always exclude "Anagarigam" from Kollywood (region IN), case-ignoring, before returning
   const data = await response.json();
-  if (region === "IN" && data && Array.isArray(data.results)) {
-    data.results = data.results.filter(
-      movie => !movie.title || movie.title.trim().toLowerCase() !== "anagarigam"
+
+  if (isKollywood && data && Array.isArray(data.results)) {
+    // Filter: only Tamil-language movies, and exclude "Anagarigam" (which can be an outlier)
+    data.results = data.results.filter(movie =>
+      movie &&
+      (
+        movie.original_language === "ta" ||
+        (movie.original_language === "ta" ||
+          (movie.spoken_languages && movie.spoken_languages.some(l => l.iso_639_1 === "ta")))
+      ) &&
+      (!movie.title || movie.title.trim().toLowerCase() !== "anagarigam")
     );
   }
   return data;

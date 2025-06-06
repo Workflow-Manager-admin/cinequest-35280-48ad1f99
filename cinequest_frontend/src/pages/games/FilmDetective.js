@@ -68,8 +68,24 @@ export default function FilmDetective() {
           attempts++;
           continue;
         }
-        let candidate = discover.results[
-          Math.floor(Math.random() * discover.results.length)
+
+        // Kollywood: Robust post-filter to enforce Tamil only, even if API params weakened
+        let filteredResults = region === "IN"
+          ? discover.results.filter(
+              m =>
+                m &&
+                m.original_language === "ta" &&
+                (!m.title || m.title.trim().toLowerCase() !== "anagarigam")
+            )
+          : discover.results;
+
+        if (!filteredResults.length) {
+          attempts++;
+          continue;
+        }
+
+        let candidate = filteredResults[
+          Math.floor(Math.random() * filteredResults.length)
         ];
         // Skip if no poster, title, or already played this one
         if (

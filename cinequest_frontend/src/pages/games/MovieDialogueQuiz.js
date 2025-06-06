@@ -71,7 +71,7 @@ export default function MovieDialogueQuiz() {
         const page = 1 + Math.floor(Math.random() * 5);
         const res = await fetchMoviesByRegion(region, { page });
         if (!res || !res.results) break;
-        // Find a suitable movie
+        // Robust filter: for region "IN", only Tamil
         const candidates = res.results.filter(
           (m) =>
             m &&
@@ -81,7 +81,8 @@ export default function MovieDialogueQuiz() {
               (typeof m.overview === "string" && m.overview.length > 20) ||
               (typeof m.id === "number")
             ) &&
-            m.title.length > 3
+            m.title.length > 3 &&
+            (region !== "IN" || m.original_language === "ta")
         );
         if (candidates.length === 0) {
           tries++;

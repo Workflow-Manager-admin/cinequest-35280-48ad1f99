@@ -14,22 +14,29 @@ async function getStrictObjectCluesRound(region = "US") {
     const url = new URL("https://api.themoviedb.org/3/discover/movie");
     url.searchParams.append("api_key", API_KEY);
     url.searchParams.append("region", region);
-    url.searchParams.append("with_original_language", region === "IN" ? "ta" : "en");
+    if (region === "IN") {
+      url.searchParams.append("with_original_language", "ta");
+      url.searchParams.append("language", "ta-IN");
+    } else {
+      url.searchParams.append("with_original_language", "en");
+      url.searchParams.append("language", "en-US");
+    }
     url.searchParams.append("sort_by", "popularity.desc");
     url.searchParams.append("page", page);
     const resp = await fetch(url.toString());
     if (!resp.ok) return null;
     const data = await resp.json();
     if (data && Array.isArray(data.results) && data.results.length) {
-      // Filter only movies with poster for UX and remove Kollywood "Anagarigam"
+      // Filter: only movies with poster, and strictly Tamil for Kollywood region
       const filtered = data.results.filter(
         m =>
           !!m.poster_path &&
           m.title &&
-          !(
+          (!(
             region === "IN" &&
-            m.title.trim().toLowerCase() === "anagarigam"
-          )
+            (m.original_language !== "ta" ||
+              (m.title && m.title.trim().toLowerCase() === "anagarigam"))
+          ))
       );
       if (filtered.length) {
         return filtered[Math.floor(Math.random() * filtered.length)];
