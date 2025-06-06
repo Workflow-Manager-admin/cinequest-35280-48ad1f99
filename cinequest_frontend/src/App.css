@@ -16,16 +16,24 @@
   --grey: #e3e2e8;
   --text-main: #151414;
   --text-light: #333;
+  --text-secondary: rgba(38,12,54,0.70);
   --header-shadow: 0 2px 12px rgba(151,60,170,0.07);
+  --navbar-bg: #fff;
+  --navbar-txt: #973caa;
 
   --card-shadow: 0 4px 28px 0 rgba(42, 21, 54, 0.09), 0 1.5px 4px 0 rgba(150,50,180,0.08);
-  --card-hover-shadow: 0 6px 34px 0 rgba(151,60,170,0.15), 0 1.5px 8px 0 rgba(150,50,180,0.14);
+  --card-hover-shadow: 0 6px 38px 0 rgba(151,60,170,0.17), 0 1.5px 8px 0 rgba(150,50,180,0.14);
   --focus-ring: 0 0 0 3px rgba(151,60,170,0.18);
   --border: #e7e3f3;
+  --border-color: #e7e3f3;
+  --base-dark: #151414;
+  --base-light: #973caa;
+
   --error-bg: #ffe8ee;
   --error-text: #aa1645;
   --success-bg: #edfbe9;
 }
+
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Nunito+Sans:wght@400;700&display=swap');
 

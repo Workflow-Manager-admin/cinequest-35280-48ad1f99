@@ -24,10 +24,48 @@ export default function SignupPage() {
     if (ok) navigate("/dashboard");
   }
 
+  // Styles for auth
+  const authWrap = {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: "calc(90vh - 80px)",
+    background: "none"
+  };
+  const formWrap = {
+    background: "white",
+    borderRadius: "18px",
+    boxShadow: "0 6px 28px 0 rgba(151,60,170,0.11)",
+    padding: "38px 36px 32px",
+    width: "100%",
+    maxWidth: 376,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    animation: "fadeInPop 0.61s cubic-bezier(.41,.81,.52,1)",
+    marginTop: 32,
+    marginBottom: 22
+  };
+  const titleStyle = {
+    margin: "0 0 23px",
+    color: "#973caa",
+    fontWeight: 700,
+    fontSize: "2rem"
+  };
+  const inputStyle = {
+    marginBottom: 20
+  };
+  const linkStyle = {
+    color: "#973caa",
+    fontWeight: 600,
+    textDecoration: "underline",
+    marginLeft: 2
+  };
+
   return (
-    <div className="auth-container">
-      <form className="auth-form" autoComplete="off" onSubmit={handleSubmit}>
-        <h2>Create an account</h2>
+    <div className="auth-container" style={authWrap}>
+      <form className="auth-form subtle-pop" autoComplete="off" onSubmit={handleSubmit} style={formWrap}>
+        <h2 style={titleStyle}>Create an account</h2>
         <input
           className="input"
           name="username"
@@ -35,6 +73,7 @@ export default function SignupPage() {
           value={fields.username}
           onChange={handleChange}
           autoFocus
+          style={inputStyle}
         />
         <input
           className="input"
@@ -43,16 +82,17 @@ export default function SignupPage() {
           type="password"
           value={fields.password}
           onChange={handleChange}
+          style={inputStyle}
         />
         {error && <ErrorToast message={error} />}
-        <button className="btn btn-large" type="submit" disabled={loading}>
+        <button className="btn btn-large subtle-pop" type="submit" disabled={loading} style={{ marginTop: 16, marginBottom: 8 }}>
           {loading ? <Loader size="18" /> : "Sign up"}
         </button>
-        <div style={{ marginTop: 12 }}>
-          Already have an account?{" "}
+        <div style={{ marginTop: 12, fontSize: ".99rem", color: "#666" }}>
+          Already have an account?
           <Link
             to="/login"
-            style={{ color: "#973caa", fontWeight: 500, textDecoration: "underline" }}
+            style={linkStyle}
           >
             Log in
           </Link>
