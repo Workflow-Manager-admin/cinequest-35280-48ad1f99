@@ -181,7 +181,6 @@ export default function DashboardPage() {
       <span style={styles.brandBar} />
       <div style={styles.columnsContainer} className="dashboard-columns-container">
         <section style={styles.column} className="dashboard-column">
-          <h2 style={styles.sectionHeader}>Hollywood</h2>
           <div style={styles.cardList}>
             {sectioned.Hollywood.map((game) => (
               <GameCard
@@ -202,7 +201,6 @@ export default function DashboardPage() {
           )}
         </section>
         <section style={styles.column} className="dashboard-column">
-          <h2 style={styles.sectionHeader}>Kollywood</h2>
           <div style={styles.cardList}>
             {sectioned.Kollywood.map((game) => (
               <GameCard
