@@ -619,7 +619,7 @@ export default function FilmDetective() {
               {/* Kollywood: Show answer in Roman script (using transliterator) */}
               <span style={{ color: "#973caa" }}>
                 {region === "IN"
-                  ? require("../../tamilTransliterator").getKollywoodAnswerRoman(gameState.question.movie)
+                  ? require("../../tamilTransliterator").getKollywoodDisplayAnswer(gameState.question.movie)
                   : gameState.question.movieTitle}
               </span>
             </div>

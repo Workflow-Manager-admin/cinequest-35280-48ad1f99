@@ -479,7 +479,7 @@ export default function MovieIQChallenge() {
                 >
                   <span style={{ color: "#973caa" }}>
                     {region === "IN"
-                      ? require("../../tamilTransliterator").getKollywoodAnswerRoman(round.answer)
+                      ? require("../../tamilTransliterator").getKollywoodDisplayAnswer(round.answer)
                       : round.answer.title}
                   </span>
                   {round.answer.release_date ? ` (${round.answer.release_date.slice(0, 4)})` : ""}

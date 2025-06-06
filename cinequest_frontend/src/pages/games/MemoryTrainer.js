@@ -560,7 +560,7 @@ export default function MemoryTrainer() {
                     <div style={styles.titleBox}>
                       <span style={{ color: "#973caa" }}>
                         {region === "IN"
-                          ? require("../../tamilTransliterator").getKollywoodAnswerRoman(round.movie)
+                          ? require("../../tamilTransliterator").getKollywoodDisplayAnswer(round.movie)
                           : round.movie.title}
                       </span>{" "}
                     </div>

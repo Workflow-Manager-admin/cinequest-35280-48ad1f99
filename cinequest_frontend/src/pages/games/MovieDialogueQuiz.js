@@ -430,7 +430,7 @@ export default function MovieDialogueQuiz() {
                       // Kollywood: show Romanized title for choices
                       title={
                         region === "IN"
-                          ? require("../../tamilTransliterator").getKollywoodAnswerRoman(movie)
+                          ? require("../../tamilTransliterator").getKollywoodDisplayAnswer(movie)
                           : movie.title
                       }
                       description={movie.release_date ? movie.release_date.slice(0,4) : ""}

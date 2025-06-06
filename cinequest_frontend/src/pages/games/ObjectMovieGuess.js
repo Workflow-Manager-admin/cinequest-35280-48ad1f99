@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import BackButton from "../../components/BackButton";
-import { getKollywoodAnswerRoman } from "../../tamilTransliterator";
+import { getKollywoodAnswerRoman, getKollywoodDisplayAnswer } from "../../tamilTransliterator";
 
 // Replacement for getObjectGuessRound with strict object/prop/place-only clue logic.
 // Uses TMDB API directly for advanced clue filtering.
@@ -287,7 +287,7 @@ export default function ObjectMovieGuess() {
       setFeedback(
         `❌ Wrong! The answer was: ${
           round && region === "IN"
-            ? getKollywoodAnswerRoman(round.movie)
+            ? getKollywoodDisplayAnswer(round.movie)
             : round && round.movie.title
         }`
       );
@@ -599,7 +599,7 @@ export default function ObjectMovieGuess() {
                 >
                   <span style={{ color: "#973caa" }}>
                     {region === "IN"
-                      ? getKollywoodAnswerRoman(round.movie)
+                      ? getKollywoodDisplayAnswer(round.movie)
                       : round.movie.title}
                   </span>
                 </div>
