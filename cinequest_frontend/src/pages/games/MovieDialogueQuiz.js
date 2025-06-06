@@ -12,6 +12,7 @@ import BackButton from "../../components/BackButton";
 // - Redacts forbidden terms in clues for challenging gameplay
 
 export default function MovieDialogueQuiz() {
+  const MAX_QUESTIONS = 18;
   const [region, setRegion] = useState("US");
   const [round, setRound] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -20,6 +21,7 @@ export default function MovieDialogueQuiz() {
   const [feedback, setFeedback] = useState(null);
   const [score, setScore] = useState(0);
   const [played, setPlayed] = useState(0);
+  const [showScore, setShowScore] = useState(false); // End-of-session score screen
 
   // Helper: redact forbidden terms (movie title/keywords) in clue
   function redactClue(text, forbidden) {
@@ -202,20 +204,39 @@ export default function MovieDialogueQuiz() {
 
   // User choice handler
   function handleChoose(movie) {
-    if (selected) return;
+    if (selected || showScore) return;
     setSelected(movie);
     setPlayed((p) => p + 1);
+
+    // Determine if this is the final question
+    const nextPlayed = played + 1;
+    const isFinal = nextPlayed >= MAX_QUESTIONS;
+
     if (movie.id === round.answer.id) {
       setScore((s) => s + 1);
       setFeedback("correct");
-      setTimeout(() => {
-        loadRound();
-      }, 1100);
+      if (isFinal) {
+        setTimeout(() => {
+          setShowScore(true);
+          setRound(null);
+        }, 1000);
+      } else {
+        setTimeout(() => {
+          loadRound();
+        }, 1100);
+      }
     } else {
       setFeedback("wrong");
-      setTimeout(() => {
-        loadRound();
-      }, 1400);
+      if (isFinal) {
+        setTimeout(() => {
+          setShowScore(true);
+          setRound(null);
+        }, 1200);
+      } else {
+        setTimeout(() => {
+          loadRound();
+        }, 1400);
+      }
     }
   }
 
@@ -290,7 +311,12 @@ export default function MovieDialogueQuiz() {
           style={styles.btn(region === "US")}
           onClick={() => {
             setRegion("US");
-            setScore(0); setPlayed(0);
+            setScore(0);
+            setPlayed(0);
+            setShowScore(false);
+            setSelected(null);
+            setFeedback(null);
+            loadRound();
           }}
           disabled={region === "US"}
           type="button"
@@ -302,7 +328,12 @@ export default function MovieDialogueQuiz() {
           style={styles.btn(region === "IN")}
           onClick={() => {
             setRegion("IN");
-            setScore(0); setPlayed(0);
+            setScore(0);
+            setPlayed(0);
+            setShowScore(false);
+            setSelected(null);
+            setFeedback(null);
+            loadRound();
           }}
           disabled={region === "IN"}
           type="button"
@@ -312,63 +343,126 @@ export default function MovieDialogueQuiz() {
       </div>
       <div style={styles.score}>
         Score: {score} / {played}
+        {` (Max: ${MAX_QUESTIONS})`}
       </div>
-      {errMsg && <ErrorToast message={errMsg} />}
-      {loading && (
-        <div style={{ margin: "18px 0", textAlign: "center" }}>
-          <Loader size={32} />
+      {showScore ? (
+        <div
+          style={{
+            background: "#edeafa",
+            borderRadius: 15,
+            padding: "31px 13px 25px",
+            boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.09)",
+            textAlign: "center",
+            margin: "35px auto 12px",
+            maxWidth: 370,
+            animation: "fadeInPop 0.54s cubic-bezier(.41,.81,.52,1)",
+          }}
+          className="subtle-pop"
+          aria-label="Quiz End Score"
+        >
+          <div
+            style={{
+              fontSize: "1.51rem",
+              fontWeight: 900,
+              color: "#973caa",
+              letterSpacing: ".013em",
+              marginBottom: 6,
+            }}
+          >
+            🎉 Quiz Complete!
+          </div>
+          <div style={{ fontWeight: 700, color: "#763195", fontSize: "1.19rem", margin: "10px 0" }}>
+            Final Score: <span style={{ color: "#24974e" }}>{score}</span> / {MAX_QUESTIONS}
+          </div>
+          <div style={{ margin: "7px 0 20px", color: "#8e83a2", fontSize: ".99rem" }}>
+            {score === MAX_QUESTIONS
+              ? "Perfect score – You're a movie quote genius!"
+              : score >= 13
+              ? "Awesome! You really know your movies."
+              : score >= 7
+              ? "Solid job! Keep watching more films!"
+              : "Give it another try for a higher score."}
+          </div>
+          <button
+            className="btn btn-large"
+            style={{ fontWeight: 700, marginBottom: 7, marginTop: 8, fontSize: "1.14rem" }}
+            onClick={() => {
+              setScore(0);
+              setPlayed(0);
+              setShowScore(false);
+              setSelected(null);
+              setFeedback(null);
+              loadRound();
+            }}
+          >
+            Play Again
+          </button>
         </div>
-      )}
-      {!loading && round && (
-        <div>
-          <div style={styles.quote} aria-label="Movie quote/clue">
-            &ldquo;{round.text}&rdquo;
-          </div>
-          <div style={styles.choicesRow}>
-            {round.choices.map((movie) => {
-              const isAnswer = selected && movie.id === round.answer.id;
-              const wrong = selected && selected.id === movie.id && !isAnswer;
-              return (
-                <GameCard
-                  key={movie.id}
-                  movie
-                  title={movie.title}
-                  description={movie.release_date ? movie.release_date.slice(0,4) : ""}
-                  poster={posterUrl(movie.poster_path)}
-                  year=""
-                  onClick={() => handleChoose(movie)}
-                  style={{
-                    opacity: selected && !isAnswer && !wrong ? 0.65 : 1,
-                    border:
-                      isAnswer && selected
-                        ? "2.5px solid #6ebf55"
-                        : wrong
-                        ? "2.5px solid #db3662"
-                        : undefined
-                  }}
-                />
-              );
-            })}
-          </div>
-          {selected && (
-            <div
-              style={{
-                color: feedback === "correct" ? "#2e9245" : "#db3662",
-                fontWeight: 700,
-                fontSize: "1.13rem",
-                textAlign: "center",
-                marginTop: 7,
-                marginBottom: 2,
-                minHeight: 24,
-                letterSpacing: ".007em"
-              }}
-            >
-              {feedback === "correct"
-                ? "🎉 Correct!"
-                : `❌ Wrong! The answer was: ${round.answer.title}`}
+      ) : (
+        <>
+          {errMsg && <ErrorToast message={errMsg} />}
+          {loading && (
+            <div style={{ margin: "18px 0", textAlign: "center" }}>
+              <Loader size={32} />
             </div>
           )}
-        </div>
+          {!loading && round && (
+            <div>
+              <div style={styles.quote} aria-label="Movie quote/clue">
+                &ldquo;{round.text}&rdquo;
+              </div>
+              <div style={styles.choicesRow}>
+                {round.choices.map((movie) => {
+                  const isAnswer = selected && movie.id === round.answer.id;
+                  const wrong = selected && selected.id === movie.id && !isAnswer;
+                  return (
+                    <GameCard
+                      key={movie.id}
+                      movie
+                      title={movie.title}
+                      description={movie.release_date ? movie.release_date.slice(0,4) : ""}
+                      poster={posterUrl(movie.poster_path)}
+                      year=""
+                      onClick={() => handleChoose(movie)}
+                      style={{
+                        opacity: selected && !isAnswer && !wrong ? 0.65 : 1,
+                        border:
+                          isAnswer && selected
+                            ? "2.5px solid #6ebf55"
+                            : wrong
+                            ? "2.5px solid #db3662"
+                            : undefined
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              {selected && (
+                <div
+                  style={{
+                    color: feedback === "correct" ? "#2e9245" : "#db3662",
+                    fontWeight: 700,
+                    fontSize: "1.13rem",
+                    textAlign: "center",
+                    marginTop: 7,
+                    marginBottom: 2,
+                    minHeight: 24,
+                    letterSpacing: ".007em"
+                  }}
+                >
+                  {feedback === "correct"
+                    ? "🎉 Correct!"
+                    : `❌ Wrong! The answer was: ${round.answer.title}`}
+                </div>
+              )}
+              <div style={{ marginTop: 14, color: "#a58cc2", fontSize: ".99rem", textAlign: "center" }}>
+                {played < MAX_QUESTIONS
+                  ? `Question ${played + 1} of ${MAX_QUESTIONS}`
+                  : `End of quiz`}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
