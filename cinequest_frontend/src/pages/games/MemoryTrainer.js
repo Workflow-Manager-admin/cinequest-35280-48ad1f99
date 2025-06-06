@@ -5,21 +5,25 @@ import { getMemoryTrainerRound } from "../../tmdbGameUtils";
 import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
-// Movie Memory Trainer – User sees a movie still for 5 seconds, then must answer a challenging recall question (no immediate answer reveal, never just 'year', more advanced question types).
+// Movie Memory Trainer – User sees a movie still for 5 seconds, then must answer a challenging recall question (no immediate answer reveal, never just 'year', genre-based questions disabled, answer only revealed on button click, and such rounds do not count for score).
 
 const TIMER_DISPLAY = 5; // seconds to show image before quiz
 
 /**
- * Helper: select a challenging recall question (e.g. actor, genre, director, or plot).
- * Ensures NO easy/repetitive "release year" questions, prefers "who starred", "what genre", "who directed", etc.
- * Avoids revealing answer until user responds.
+ * Helper: select a challenging recall question (e.g. actor, director, or plot).
+ * Ensures NO genre-based questions, NO easy/repetitive "release year" questions, prefers "who starred", "who directed", etc.
+ * Never reveals answer until user actively requests it.
  */
 function extractChallengingQuestion(round) {
-  // Prefer: main actor, genre, director, tagline (NEVER just year).
+  // Prefer: main actor, director, tagline (NEVER genre or just year)
   if (!round || !round.movie) return null;
   const movie = round.movie;
   // Use director if present
-  if (round.recallType === "director" && round.answer && round.answer.split(",").join("").trim()) {
+  if (
+    round.recallType === "director" &&
+    round.answer &&
+    round.answer.split(",").join("").trim()
+  ) {
     return {
       recallQ: "Who is the director of this movie?",
       answer: round.answer,
@@ -27,16 +31,8 @@ function extractChallengingQuestion(round) {
       placeholder: "Enter director's name",
     };
   }
-  // Use genre if not just year
-  if (movie.genres && movie.genres.length && round.recallType === "genre") {
-    return {
-      recallQ: "Name one of the genres for this movie.",
-      answer: movie.genres[0].name,
-      recallType: "genre",
-      placeholder: "Enter a genre (e.g. Drama)",
-    };
-  }
-  // If no genre names, use first cast member (main actor)
+  // DISABLE genre-based questions entirely!
+  // Use main actor if available
   if (movie.credits && movie.credits.cast && movie.credits.cast.length > 0) {
     return {
       recallQ: "Who plays a starring role in this movie?",
@@ -45,8 +41,12 @@ function extractChallengingQuestion(round) {
       placeholder: "Enter actor name",
     };
   }
-  // Else fallback: director/year
-  if (round.recallType === "year" && round.answer && round.answer.trim()) {
+  // Fallback: director/year (but not genre)
+  if (
+    round.recallType === "year" &&
+    round.answer &&
+    round.answer.trim()
+  ) {
     return {
       recallQ: "What is the exact release year of this movie?",
       answer: round.answer,
@@ -54,7 +54,7 @@ function extractChallengingQuestion(round) {
       placeholder: "Enter year (e.g. 2001)",
     };
   }
-  // Fallback: title includes genre id as last resort
+  // Fallback: generic
   return {
     recallQ: "Recall a key detail from the image you just saw.",
     answer: round.answer,
@@ -78,10 +78,12 @@ export default function MemoryTrainer() {
   const [played, setPlayed] = useState(0);
   const [recallMeta, setRecallMeta] = useState(null);
   const [showScore, setShowScore] = useState(false);
+  // Track revealed/skipped round (for Reveal Answer)
+  const [revealed, setRevealed] = useState(false);
 
   const timerRef = useRef();
 
-  // Helper to reset all gameplay state for replay or region switch
+  // Helper to reset all gameplay state for replay/region switch
   function resetGameState(nextRegion = region) {
     setScore(0);
     setPlayed(0);
@@ -95,7 +97,7 @@ export default function MemoryTrainer() {
     setShowImage(false);
     setRound(null);
     setLoading(false);
-    // If region is changed, effect below will loadRound automatically
+    setRevealed(false);
     if (nextRegion === region) {
       loadRound(nextRegion, true);
     }
@@ -109,6 +111,7 @@ export default function MemoryTrainer() {
       setRound(null);
       setShowImage(false);
       setLoading(false);
+      setRevealed(false);
       return;
     }
     setLoading(true);
@@ -120,6 +123,7 @@ export default function MemoryTrainer() {
     setFeedback("");
     setTimer(TIMER_DISPLAY);
     setRecallMeta(null);
+    setRevealed(false);
     try {
       const res = await getMemoryTrainerRound(targetRegion);
       if (!res) {
@@ -127,12 +131,14 @@ export default function MemoryTrainer() {
         setLoading(false);
         return;
       }
-      // fetch extra data for more challenging recall, if available (e.g., main actor)
+      // fetch extra data for more challenging recall, if available (e.g. main actor)
       if (res.movie && !res.movie.genres) {
         // Try to get actual genres and credits for harder question
         const movieDetails = await fetch(
           `https://api.themoviedb.org/3/movie/${res.movie.id}?api_key=${process.env.REACT_APP_TMDB_API_KEY}&append_to_response=credits`
-        ).then(r => r.ok ? r.json() : res.movie).catch(() => res.movie);
+        )
+          .then((r) => (r.ok ? r.json() : res.movie))
+          .catch(() => res.movie);
         res.movie.genres = movieDetails.genres || res.movie.genres;
         res.movie.credits = movieDetails.credits || {};
       }
@@ -142,6 +148,7 @@ export default function MemoryTrainer() {
       setShowImage(true);
       setLoading(false);
       setTimer(TIMER_DISPLAY);
+      setRevealed(false);
     } catch (e) {
       setErrMsg("Failed to get a movie round. Retry.");
       setLoading(false);
@@ -181,29 +188,22 @@ export default function MemoryTrainer() {
     // eslint-disable-next-line
   }, [showScore]);
 
-  // Answer submission + feedback (only reveal correct answer after submit)
+  // Answer submission + feedback (only reveal correct answer after submit, but cannot submit if revealed)
   function handleSubmit(e) {
     e.preventDefault();
-    if (answered || showScore) return;
+    if (answered || showScore || revealed) return;
     setAnswered(true);
     setPlayed((p) => p + 1);
 
     let normalizedGuess = (input || "").trim().toLowerCase();
     let correct = false;
     if (!round) return;
-    const expected = (recallMeta && recallMeta.answer ? recallMeta.answer : round.answer) || "";
+    const expected =
+      (recallMeta && recallMeta.answer ? recallMeta.answer : round.answer) || "";
 
-    // Keep logic challenging and forgiving:
     if (recallMeta) {
       if (recallMeta.recallType === "director") {
         correct = expected.toLowerCase().includes(normalizedGuess);
-      } else if (recallMeta.recallType === "genre") {
-        correct =
-          !!(
-            round.movie &&
-            round.movie.genres &&
-            round.movie.genres.find(g => normalizedGuess === g.name.toLowerCase())
-          );
       } else if (recallMeta.recallType === "actor") {
         correct = expected.toLowerCase().includes(normalizedGuess);
       } else if (recallMeta.recallType === "year") {
@@ -212,6 +212,7 @@ export default function MemoryTrainer() {
         correct = expected.toLowerCase().includes(normalizedGuess);
       }
     }
+
     if (correct) {
       setFeedback("🎉 Correct!");
       setScore((s) => s + 1);
@@ -237,6 +238,25 @@ export default function MemoryTrainer() {
     }
   }
 
+  // Reveal/skip button logic: disables submit, shows answer as skipped, and does NOT count to score.
+  function handleReveal() {
+    if (revealed || answered || showScore) return;
+    setRevealed(true);
+    setAnswered(false); // cannot submit after reveal
+    setPlayed((p) => p + 1);
+    setFeedback(
+      `⏭️ Revealed! The answer was: ${
+        (recallMeta && recallMeta.answer)
+          || (round && round.answer)
+          || ""
+      }`
+    );
+    // After skip, show next question with delay
+    setTimeout(() => {
+      loadRound();
+    }, 1700);
+  }
+
   // UI styles
   const styles = {
     container: {
@@ -247,18 +267,18 @@ export default function MemoryTrainer() {
       boxShadow: "0 6px 28px 0 rgba(151,60,170,.13)",
       padding: "36px 16px 32px",
       minHeight: 350,
-      animation: "fadeInPop 0.5s"
+      animation: "fadeInPop 0.5s",
     },
     header: {
       color: "#973caa",
       margin: "0 0 10px",
-      textShadow: "0 2px 18px #973caa18"
+      textShadow: "0 2px 18px #973caa18",
     },
     regionBar: {
       display: "flex",
       gap: 10,
       marginBottom: 15,
-      marginTop: 2
+      marginTop: 2,
     },
     btn: (isActive) => ({
       background: isActive ? "#973caa" : "#edeafa",
@@ -268,7 +288,7 @@ export default function MemoryTrainer() {
       padding: "7px 16px",
       minWidth: 108,
       borderRadius: 7,
-      cursor: isActive ? "default" : "pointer"
+      cursor: isActive ? "default" : "pointer",
     }),
     imageBox: {
       width: "100%",
@@ -276,7 +296,7 @@ export default function MemoryTrainer() {
       textAlign: "center",
       display: "flex",
       flexDirection: "column",
-      alignItems: "center"
+      alignItems: "center",
     },
     movieImg: {
       width: "95%",
@@ -287,7 +307,7 @@ export default function MemoryTrainer() {
       objectFit: "cover",
       maxHeight: 270,
       background: "#eee",
-      animation: "fadeInPop 0.8s"
+      animation: "fadeInPop 0.8s",
     },
     timerBar: {
       width: "82%",
@@ -295,39 +315,41 @@ export default function MemoryTrainer() {
       background: "#edeafa",
       borderRadius: 8,
       overflow: "hidden",
-      margin: "11px 0 0"
+      margin: "11px 0 0",
     },
     timerFill: {
       height: "100%",
       borderRadius: 8,
       background: "linear-gradient(90deg,#973caa,#c056d4 88%)",
       transition: "width 0.8s cubic-bezier(.47,1.6,.47,.86)",
-      width: `${(timer / TIMER_DISPLAY) * 100}%`
+      width: `${(timer / TIMER_DISPLAY) * 100}%`,
     },
     question: {
       margin: "12px 0 18px",
       fontWeight: 700,
       fontSize: "1.14rem",
       letterSpacing: ".017em",
-      color: "#763195"
+      color: "#763195",
     },
     ansForm: {
-      display: "flex", flexDirection: "row",
-      alignItems: "center", gap: 10,
-      margin: "15px 0 4px"
+      display: "flex",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      margin: "15px 0 4px",
     },
     score: {
       fontWeight: 700,
       color: "#973caa",
       fontSize: "1.04rem",
       margin: "0 0 12px",
-      letterSpacing: ".009em"
+      letterSpacing: ".009em",
     },
     reveal: {
       margin: "12px 0 0",
       color: "#868095",
       fontWeight: 600,
-      fontSize: ".99rem"
+      fontSize: ".99rem",
     },
     titleBox: {
       marginTop: 14,
@@ -338,7 +360,7 @@ export default function MemoryTrainer() {
       fontWeight: 600,
       boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
       fontSize: ".98rem",
-      textAlign: "center"
+      textAlign: "center",
     },
     scoreScreen: {
       background: "#edeafa",
@@ -349,7 +371,7 @@ export default function MemoryTrainer() {
       margin: "38px auto",
       maxWidth: 370,
       animation: "fadeInPop 0.5s cubic-bezier(.41,.81,.52,1)",
-    }
+    },
   };
 
   return (
@@ -448,13 +470,16 @@ export default function MemoryTrainer() {
                       letterSpacing: ".01em"
                     }}
                   >
-                    Memorize every detail... Question in <span style={{color:"#973caa", fontWeight:700}}>{timer}s</span>!
+                    Memorize every detail... Question in{" "}
+                    <span style={{ color: "#973caa", fontWeight: 700 }}>{timer}s</span>!
                   </div>
                 </div>
               ) : (
                 <>
                   <div style={styles.question}>
-                    {recallMeta ? recallMeta.recallQ : "Recall a key detail about the movie you just saw."}
+                    {recallMeta
+                      ? recallMeta.recallQ
+                      : "Recall a key detail about the movie you just saw."}
                   </div>
                   <form style={styles.ansForm} onSubmit={handleSubmit} autoComplete="off">
                     <input
@@ -463,7 +488,7 @@ export default function MemoryTrainer() {
                       onChange={e => setInput(e.target.value)}
                       autoFocus
                       placeholder={recallMeta ? recallMeta.placeholder : ""}
-                      disabled={answered}
+                      disabled={answered || revealed}
                       style={{
                         width: 190,
                         maxWidth: 260,
@@ -475,19 +500,42 @@ export default function MemoryTrainer() {
                     <button
                       className="btn"
                       type="submit"
-                      disabled={answered}
+                      disabled={answered || revealed}
                       style={{ padding: "10px 22px", fontWeight: 700 }}
                     >
                       {answered ? "✓" : "Submit"}
                     </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{
+                        ...styles.btn(false),
+                        border: "1.2px dashed #c8b9db",
+                        background: "#f8f3fa",
+                        color: "#973caa",
+                        fontWeight: 700,
+                        fontSize: ".98rem",
+                        marginLeft: 7,
+                        textDecoration: "underline",
+                        padding: "8px 11px",
+                        minWidth: 0,
+                      }}
+                      disabled={answered || revealed}
+                      onClick={handleReveal}
+                      aria-label="Reveal Answer"
+                    >
+                      {revealed ? "Revealed" : "Reveal Answer"}
+                    </button>
                   </form>
-                  {/* Only show feedback and correct answer after user submits */}
-                  {answered ? (
+                  {/* Only show feedback and correct answer after user submits or reveal */}
+                  {(answered || revealed) ? (
                     <div
                       className="subtle-pop"
                       style={{
                         color: feedback.startsWith("🎉")
                           ? "#24974e"
+                          : feedback.startsWith("⏭️")
+                          ? "#c29817"
                           : "#db3662",
                         fontWeight: 700,
                         fontSize: "1.14rem",
@@ -517,13 +565,27 @@ export default function MemoryTrainer() {
           )}
           {!loading && !round && !errMsg && (
             <div style={{ margin: "20px 0", color: "#c75e77" }}>
-              Oops, unable to load a round. <button className="btn" onClick={() => loadRound(region, true)}>Retry</button>
+              Oops, unable to load a round.{" "}
+              <button className="btn" onClick={() => loadRound(region, true)}>
+                Retry
+              </button>
             </div>
           )}
         </>
       )}
-      <div style={{ marginTop: 26, color: "#a58cc2", textAlign: "center", fontWeight: 500, fontSize: ".98rem", letterSpacing: ".008em" }}>
-        Glimpse a random movie image for 5 seconds, then prove your recall! We’ll grill you on main actor, genre, director or another tricky detail.
+      <div
+        style={{
+          marginTop: 26,
+          color: "#a58cc2",
+          textAlign: "center",
+          fontWeight: 500,
+          fontSize: ".98rem",
+          letterSpacing: ".008em",
+        }}
+      >
+        Glimpse a random movie image for 5 seconds, then prove your recall!
+        We'll grill you on main actor, director or another tricky detail.
+        Use 'Reveal Answer' if you're stuck, but it won't count for your score.
       </div>
     </div>
   );
