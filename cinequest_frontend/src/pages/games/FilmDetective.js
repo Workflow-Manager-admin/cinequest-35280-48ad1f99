@@ -7,83 +7,116 @@ import BackButton from "../../components/BackButton";
 // TMDB API KEY from env
 const TMDB_API_KEY = process.env.REACT_APP_TMDB_API_KEY;
 
-// Helpers for TMDB search by clues
+/**
+ * Improved TMDB-powered movie search using clues: actor, keyword, year.
+ *
+ * Steps:
+ *  1. If actor clue, find actor ID.
+ *  2. If keyword (quote/tagline/overview), lookup TMDB keyword ID.
+ *  3. Use "discover" endpoint with cast, year, keyword, and region.
+ *  4. Fallback: if keywords do not match, text-filter tagline/overview of results.
+ * Provides robust error handling, distinguishes between no-clues, no API result, and network failures.
+ * Displays live feedback/loading state to user.
+ */
+// PUBLIC_INTERFACE
 async function searchMoviesByClues({ actor, keyword, year, region = "US" }) {
-  const results = [];
   let actorId = null;
+  let keywordId = null;
   let actorError = "";
+  let keywordIsText = false;
 
-  // 1. Lookup actor id if actor name provided
-  if (actor) {
-    const url = new URL("https://api.themoviedb.org/3/search/person");
-    url.searchParams.append("api_key", TMDB_API_KEY);
-    url.searchParams.append("query", actor);
-    url.searchParams.append("include_adult", "false");
-    url.searchParams.append("page", "1");
-    // Optionally: region filter; here skipped for breadth
+  // Normalize inputs
+  const actorRaw = (actor || "").trim();
+  const keywordRaw = (keyword || "").trim();
+  const yearRaw = (year || "").trim();
 
-    const res = await fetch(url.toString());
-    if (!res.ok) {
-      actorError = "Actor search failed.";
-      return { results: [], error: actorError };
+  // Step 1: Try to find actorId
+  if (actorRaw.length > 0) {
+    try {
+      const url = new URL("https://api.themoviedb.org/3/search/person");
+      url.searchParams.append("api_key", TMDB_API_KEY);
+      url.searchParams.append("query", actorRaw);
+      url.searchParams.append("include_adult", "false");
+      url.searchParams.append("page", "1");
+      // For Kollywood, hint language but not reliable
+      const actorRes = await fetch(url.toString());
+      if (!actorRes.ok) throw new Error("TMDB person search failed");
+      const actorJson = await actorRes.json();
+      const actors = (actorJson && actorJson.results || []).filter(p => p.known_for_department === "Acting");
+      if (!actors.length) {
+        return { results: [], error: `No actor found named "${actorRaw}".` };
+      }
+      actorId = actors[0].id;
+    } catch (e) {
+      return { results: [], error: "Actor lookup failed. Please try again." };
     }
-    const data = await res.json();
-    if (!data.results || !data.results.length) {
-      actorError = "No actor found by this name.";
-      return { results: [], error: actorError };
-    }
-    // Get most relevant actor (first result)
-    actorId = data.results[0].id;
   }
 
-  // 2. Build query params for /discover/movie
+  // Step 2: Try to find TMDB keywordId
+  if (keywordRaw.length > 0) {
+    try {
+      const kwUrl = new URL("https://api.themoviedb.org/3/search/keyword");
+      kwUrl.searchParams.append("api_key", TMDB_API_KEY);
+      kwUrl.searchParams.append("query", keywordRaw);
+      const kwRes = await fetch(kwUrl.toString());
+      if (!kwRes.ok) throw new Error("TMDB keyword search failed");
+      const kwJson = await kwRes.json();
+      if (kwJson.results && kwJson.results.length) {
+        keywordId = kwJson.results[0].id;
+      } else {
+        keywordIsText = true;
+      }
+    } catch (e) {
+      keywordIsText = true; // fallback to text-based filter
+    }
+  }
+
+  // Step 3: Prepare /discover/movie parameters
   const discoverUrl = new URL("https://api.themoviedb.org/3/discover/movie");
   discoverUrl.searchParams.append("api_key", TMDB_API_KEY);
-  discoverUrl.searchParams.append("language", region === "IN" ? "ta-IN" : "en-US");
   discoverUrl.searchParams.append("region", region);
-  if (year) {
-    discoverUrl.searchParams.append("primary_release_year", year);
-  }
-  if (actorId) {
-    discoverUrl.searchParams.append("with_cast", actorId);
-  }
+  discoverUrl.searchParams.append("language", region === "IN" ? "ta-IN" : "en-US");
+  discoverUrl.searchParams.append("sort_by", "popularity.desc");
+  if (yearRaw) discoverUrl.searchParams.append("primary_release_year", yearRaw);
+  if (actorId) discoverUrl.searchParams.append("with_cast", actorId);
   if (region === "IN") {
     discoverUrl.searchParams.append("with_original_language", "ta");
   } else {
     discoverUrl.searchParams.append("with_original_language", "en");
   }
-  if (keyword) {
-    // We'll use "with_keywords" if it's a valid TMDB keyword, else fallback to text search on overview/tagline
-    // Start with /search/keyword
-    const kwUrl = new URL("https://api.themoviedb.org/3/search/keyword");
-    kwUrl.searchParams.append("api_key", TMDB_API_KEY);
-    kwUrl.searchParams.append("query", keyword);
-    const kwRes = await fetch(kwUrl.toString());
-    if (kwRes.ok) {
-      const kwData = await kwRes.json();
-      if (kwData.results && kwData.results.length) {
-        // Use the first keyword result
-        discoverUrl.searchParams.append("with_keywords", kwData.results[0].id);
-      }
-    }
+  if (keywordId) {
+    discoverUrl.searchParams.append("with_keywords", keywordId);
   }
 
-  // Now fetch candidates from discover
-  const res = await fetch(discoverUrl.toString());
-  if (!res.ok) {
-    return { results: [], error: "Movie search failed." };
+  // Step 4: Fetch results from /discover/movie
+  let discoverRes, discoverData, movies;
+  try {
+    discoverRes = await fetch(discoverUrl.toString());
+    if (!discoverRes.ok) throw new Error("Movie search failed.");
+    discoverData = await discoverRes.json();
+    movies = Array.isArray(discoverData.results) ? discoverData.results : [];
+  } catch {
+    return { results: [], error: "Failed to search movies. Please try again." };
   }
-  const data = await res.json();
-  let movies = data && data.results ? data.results : [];
 
-  // If keyword input was present and we didn't match by TMDB keyword, filter on overview/tagline
-  if (keyword && (!discoverUrl.searchParams.get("with_keywords"))) {
-    const norm = (s) => (s || "").toLowerCase();
-    movies = movies.filter(
-      (movie) =>
-        (movie.tagline && norm(movie.tagline).includes(norm(keyword))) ||
-        (movie.overview && norm(movie.overview).includes(norm(keyword)))
-    );
+  // Step 5: Text fallback filter if needed
+  if (keywordRaw.length > 0 && !keywordId) {
+    // fallback: scan tagline/overview for any word from the keyword string
+    const norm = s => (s || "").toLowerCase();
+    const words = keywordRaw.toLowerCase().split(/\s+/).filter(Boolean);
+    movies = movies.filter((movie) => {
+      const tagline = norm(movie.tagline);
+      const overview = norm(movie.overview);
+      // Any word matches in tagline/overview
+      return words.some(word =>
+        (tagline && tagline.includes(word)) || (overview && overview.includes(word))
+      );
+    });
+  }
+
+  // Final error checks
+  if (!movies.length) {
+    return { results: [], error: "No movies found matching all clues." };
   }
 
   return { results: movies, error: "" };
