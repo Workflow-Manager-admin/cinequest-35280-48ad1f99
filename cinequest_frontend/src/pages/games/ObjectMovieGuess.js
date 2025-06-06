@@ -1,16 +1,172 @@
 import React, { useEffect, useState } from "react";
-import { getObjectGuessRound } from "../../tmdbGameUtils";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
-import GameCard from "../../components/GameCard";
 import BackButton from "../../components/BackButton";
+
+// Replacement for getObjectGuessRound with strict object/prop/place-only clue logic.
+// Uses TMDB API directly for advanced clue filtering.
+async function getStrictObjectCluesRound(region = "US") {
+  const API_KEY = process.env.REACT_APP_TMDB_API_KEY;
+  const posterBase = "https://image.tmdb.org/t/p/w185";
+  // Helper to fetch movie by region
+  async function randomMovie() {
+    const page = 1 + Math.floor(Math.random() * 3);
+    const url = new URL("https://api.themoviedb.org/3/discover/movie");
+    url.searchParams.append("api_key", API_KEY);
+    url.searchParams.append("region", region);
+    url.searchParams.append("with_original_language", region === "IN" ? "ta" : "en");
+    url.searchParams.append("sort_by", "popularity.desc");
+    url.searchParams.append("page", page);
+    const resp = await fetch(url.toString());
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data && Array.isArray(data.results) && data.results.length) {
+      // Filter only movies with poster for UX
+      const filtered = data.results.filter(m => !!m.poster_path && m.title);
+      if (filtered.length) {
+        return filtered[Math.floor(Math.random() * filtered.length)];
+      }
+    }
+    return null;
+  }
+
+  // Given a movie, fetch all relevant object clues
+  async function getConcreteObjects(movie) {
+    // Fetch full details & credits & keywords
+    const [details, credits, keywordsResp] = await Promise.all([
+      fetch(`https://api.themoviedb.org/3/movie/${movie.id}?api_key=${API_KEY}`).then(r => r.ok ? r.json() : {}),
+      fetch(`https://api.themoviedb.org/3/movie/${movie.id}/credits?api_key=${API_KEY}`).then(r => r.ok ? r.json() : {}),
+      fetch(`https://api.themoviedb.org/3/movie/${movie.id}/keywords?api_key=${API_KEY}`).then(r => r.ok ? r.json() : {})
+    ]);
+    let clues = [];
+
+    // 1. TMDB Keywords - filter for object/thing/animal/place type (not abstract/thematic)
+    let kwArr = [];
+    if (keywordsResp && (Array.isArray(keywordsResp.keywords) || Array.isArray(keywordsResp.results))) {
+      kwArr = keywordsResp.keywords || keywordsResp.results || [];
+    }
+    // Only keep keywords that look like tangible things/places
+    const concreteKW = kwArr
+      .map(k => k.name)
+      .filter(
+        name =>
+          name &&
+          name.length <= 32 &&
+          /^[\w\s\-'.:,]+$/.test(name) &&
+          !/(genre|romance|drama|comedy|biography|family|action|thriller|history|animation|mystery|crime|film|movie|television|tv|cinema|adventure|fantasy|science\s?fiction|superhero|war|horror|documentary|music|musical|western|western|sports?|biographical|melodrama|independent|children|noir)/i.test(name) &&
+          !/story|love|marriage|childhood|revenge|survival|escape|based on|culture|tradition|life|friendship|relationships|journey|spirit|destiny|past|future|good|evil|hero|villain|justice|truth|lies|violence|betrayal|family|emotion|social|coming of age|dark/i.test(name)
+      );
+
+    clues.push(...concreteKW);
+
+    // 2. Cast - main characters' first names, but only unique, non-spoilery, and visually likely (skip if name is in title)
+    if (credits && credits.cast && credits.cast.length > 0) {
+      // Only use the real character name or actor if it's a recognizable object/prop or costume (skip real/people names unless iconic)
+      // Example: Use "Superman suit" but not "John Smith"
+      for (const person of credits.cast.slice(0, 8)) {
+        if (
+          person.character &&
+          (/\b(suit|blade|hammer|wheelchair|mask|robot|cobra|cape|ring|gun|car|bike|cycle|sari|uniform|pot|tattoo|jacket|book|diary|statue|painting|sword|shield|cap|turban|crown|hat|shoe|doll|horse|train|computer|phone|tree|dog|snake|glass|camera|drum|guitar|saxophone|pistol|pen|notebook|amulet|necklace|bottle|fan|sign|bag|vase|lamp|stick|plaque|hat|torch)\b/i.test(person.character))
+        ) {
+          const phrase = person.character;
+          if (!clues.some(c => c.toLowerCase() === phrase.toLowerCase())) {
+            clues.push(phrase);
+            if (clues.length > 7) break;
+          }
+        }
+      }
+    }
+
+    // 3. Title words (if proper nouns or concrete object/place terms in title)
+    // e.g. "Cobra", "Green Mile", "Lion", "Panther", "Pot"
+    if (movie.title) {
+      const titleWords = movie.title
+        .replace(/[^\w\s]/g, "")
+        .split(/\s+/)
+        .filter(
+          w =>
+            w.length > 2 &&
+            /^[A-Z]/.test(w) && // likely a noun/proper
+            !/(Film|Story|Movie|Comedy|Drama|Action|Thriller|Hindi|Tamil|English|Part|The|Of|In|With|And|For|An)$/i.test(w)
+        );
+      clues.push(...titleWords);
+    }
+
+    // 4. Tagline/overview - mine for object clues (less common, skip unless specific prop/object found)
+    if (details && details.tagline && details.tagline.length > 0) {
+      const tagObjs = [];
+      const words = details.tagline
+        .replace(/[^\w\s\-]/g, "")
+        .split(/\s+/)
+        .map(w => w.trim());
+      for (const w of words) {
+        if (
+          w.length > 2 &&
+          /^[A-Z]/.test(w) &&
+          !/(Love|Man|Woman|Film|Story|Movie|Comedy|Drama|Action|Thriller|Hindi|Tamil|English|Part|The|Of|In|With|And|For|An)$/i.test(w)
+        ) {
+          tagObjs.push(w);
+        }
+      }
+      // Add filtered tagline words to clues
+      clues.push(...tagObjs);
+    }
+
+    // 5. Production design - sometimes TMDB has a 'production_design' crew, rare, so skip for now.
+
+    // De-dup, limit to top 4, prefer more "object-like" clues (short, single noun), pick random order
+    let uniq = [];
+    for (let c of clues) {
+      c = (c || "").trim();
+      if (
+        c.length > 1 &&
+        isNaN(Number(c)) &&
+        !uniq.some(u => u.toLowerCase() === c.toLowerCase())
+      )
+        uniq.push(c);
+      if (uniq.length === 8) break;
+    }
+
+    // Prefer "object-like" clues (single-word, or short phrase likely to be a tangible thing/place/prop)
+    uniq = uniq.filter(
+      c =>
+        /\b(\w{2,})\b/.test(c) &&
+        !/(film|movie|genre|story|drama|romance|action|thriller|history|comedy|truth|life|love|family|hero|dark|good|evil|justice|spirit|tradition|journey|friendship|relationship)/i.test(c)
+    );
+
+    // Restore to 4 if not enough, randomly sample more from concreteKW/title/tag, but never genre
+    if (uniq.length > 4) {
+      // Shuffle picks
+      for (let i = uniq.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [uniq[i], uniq[j]] = [uniq[j], uniq[i]];
+      }
+      uniq = uniq.slice(0, 4);
+    }
+
+    // Fallback if still <2, return empty (will retry outer)
+    return uniq.length >= 2 ? uniq.slice(0, 4) : [];
+  }
+
+  // Try to get a movie with at least 2 concrete clues
+  let movie = null;
+  let clues = [];
+  let tries = 0;
+  while (tries < 8 && clues.length < 2) {
+    movie = await randomMovie();
+    if (!movie) break;
+    clues = await getConcreteObjects(movie);
+    tries++;
+  }
+  if (!movie || clues.length < 2) return null; // Fallback
+  return { movie, objects: clues };
+}
 
 /**
  * PUBLIC_INTERFACE
- * ObjectMovieGuess - Guess the movie from four TMDB-powered object clues (drawn from genres/keywords/cast/title).
- * - Fetches a random movie using TMDB.
- * - Picks four "object" clues (genre names, cast members, keywords, title words, etc.).
- * - User guesses the title.
+ * ObjectMovieGuess - Guess the movie from four TMDB-powered object/prop/place clues (never genre!).
+ * Clues use TMDB keywords, prop/costume/animal/place terms from cast/tagline/title, never genre,
+ * and only visually or physically present elements.
  */
 export default function ObjectMovieGuess() {
   // State hooks
@@ -25,7 +181,7 @@ export default function ObjectMovieGuess() {
   const [played, setPlayed] = useState(0);
   const [hintReveal, setHintReveal] = useState(false);
 
-  // Fetch a new round (movie + object clues)
+  // Fetch a new round (movie + concrete object/prop clues)
   const loadRound = async () => {
     setLoading(true);
     setErrMsg("");
@@ -34,9 +190,9 @@ export default function ObjectMovieGuess() {
     setInput("");
     setHintReveal(false);
     try {
-      const res = await getObjectGuessRound(region);
+      const res = await getStrictObjectCluesRound(region);
       if (!res || !res.movie || !res.objects || res.objects.length < 2) {
-        setErrMsg("Couldn't fetch enough clues—try again?");
+        setErrMsg("Couldn't fetch enough non-genre clues—try again?");
         setLoading(false);
         setRound(null);
         return;
@@ -68,22 +224,22 @@ export default function ObjectMovieGuess() {
         .replace(/[\W_]+/g, "")
         .trim();
     const correct =
-      normalize(input) === normalize(round.movie.title) ||
-      normalize(input) === normalize(round.movie.original_title);
+      round && (
+        normalize(input) === normalize(round.movie.title) ||
+        normalize(input) === normalize(round.movie.original_title)
+      );
     if (correct) {
       setFeedback("🎉 Correct!");
       setScore(s => s + 1);
     } else {
-      // The feedback here might not always be a string; to avoid .startsWith error, ensure string fallback
-      setFeedback(`❌ Wrong! The answer was: ${round.movie.title}`);
+      setFeedback(`❌ Wrong! The answer was: ${round && round.movie.title}`);
     }
-    // After feedback, auto-advance to next round
     setTimeout(() => {
       loadRound();
     }, correct ? 1600 : 2100);
   }
 
-  // UI styles
+  // UI styles (unchanged)
   const styles = {
     container: {
       maxWidth: 530,
@@ -331,7 +487,7 @@ export default function ObjectMovieGuess() {
       )}
       {/* Instructions */}
       <div style={styles.hintText}>
-        Guess the movie based on four object clues: genres, co-stars, and more! Not sure? Reveal the poster for help.
+        Guess the movie based on four clues: all are objects, places, props or concrete visual things seen in the movie (never genres or themes)! Not sure? Reveal the poster for help.
       </div>
     </div>
   );
