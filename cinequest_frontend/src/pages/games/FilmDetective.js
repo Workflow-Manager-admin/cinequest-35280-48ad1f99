@@ -1,453 +1,400 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import BackButton from "../../components/BackButton";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
-import BackButton from "../../components/BackButton";
+import {
+  fetchMoviesByRegion,
+  fetchMovieDetails,
+  fetchMovieCredits
+} from "../../tmdbApi";
 
-// Fixed game config
-const MAX_QUESTIONS = 18;
-const POSTER_BASE = "https://image.tmdb.org/t/p/w500";
-const TMDB_API_KEY = process.env.REACT_APP_TMDB_API_KEY;
-
-// Helper for region-specific original language
-function regionToLang(region) {
-  return region === "IN" ? "ta" : "en";
-}
-
-/*
+/**
  * PUBLIC_INTERFACE
- * Fetch ONE random movie with a poster, hero/lead actor, and year from TMDB by region/lang.
- * Ensures poster is present, gets credits for hero, skips duplicates, retries some times.
- * Returns: { id, title, poster_path, year, hero, credits }
+ * FilmDetective - Guess movies from blurred posters and clues.
+ * - 18 rounds/session, Hollywood (English) or Kollywood (Tamil) per section.
+ * - Each round: show blurred movie poster, hero (top-billed actor), release year.
+ * - User types answer, Reveal/skips allowed, show correct/incorrect visual feedback.
+ * - All movie/actor/poster data fetched dynamically from TMDB.
+ * - Robust state handling and visual feedback.
  */
-async function getDetectiveQuizRound(region = "US", excludeIds = []) {
-  // Try to find a movie that fits the clues and not a repeat
-  let tries = 0;
-  let movie = null;
-  let hero = "";
-  let credits = null;
-  while (++tries <= 10) {
-    // Fetch a page with ~18 movies
-    const page = 1 + Math.floor(Math.random() * 4);
-    const discoverUrl = new URL("https://api.themoviedb.org/3/discover/movie");
-    discoverUrl.searchParams.append("api_key", TMDB_API_KEY);
-    discoverUrl.searchParams.append("region", region);
-    discoverUrl.searchParams.append(
-      "with_original_language",
-      regionToLang(region)
-    );
-    discoverUrl.searchParams.append("sort_by", "popularity.desc");
-    discoverUrl.searchParams.append("page", page);
-    // Get the slice of movies (call API)
-    const res = await fetch(discoverUrl.toString());
-    if (!res.ok) continue;
-    const data = await res.json();
-    // Find a valid movie with poster, year, not already used
-    const movies =
-      Array.isArray(data.results) && data.results.length
-        ? data.results.filter(
-            (m) =>
-              m.poster_path &&
-              m.title &&
-              (!excludeIds.includes(m.id)) &&
-              m.release_date &&
-              /^[1-2][0-9]{3}/.test(m.release_date)
-          )
-        : [];
-    if (!movies.length) continue;
-    movie = movies[Math.floor(Math.random() * movies.length)];
-    // Fetch credits to get hero
-    try {
-      const credUrl = new URL(
-        `https://api.themoviedb.org/3/movie/${movie.id}/credits`
-      );
-      credUrl.searchParams.append("api_key", TMDB_API_KEY);
-      const credRes = await fetch(credUrl.toString());
-      credits = await credRes.json();
-      if (credits && credits.cast && credits.cast.length > 0) {
-        hero = credits.cast[0].name || "";
-      }
-    } catch {}
-    // Hero requirement
-    if (hero && hero.trim().length > 1) {
-      return {
-        ...movie,
-        poster_path: movie.poster_path,
-        year: String(movie.release_date).slice(0, 4),
-        hero,
-        credits,
-      };
-    }
-    // else try again
-    movie = null;
-  }
-  return null;
-}
 
-// Blur effect for poster image
-function BlurredPoster({ src, alt }) {
-  return (
-    <div
-      style={{
-        width: 270,
-        height: 390,
-        margin: "0 auto 0",
-        overflow: "hidden",
-        borderRadius: 18,
-        background: "#e3e2e8",
-        boxShadow: "0 1.5px 14px 0 rgba(151,60,170,0.12)",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        filter: "none",
-      }}
-    >
-      {src ? (
-        <img
-          src={src}
-          alt={alt}
-          style={{
-            width: "100%",
-            height: 390,
-            objectFit: "cover",
-            filter: "blur(18px) brightness(0.84) contrast(1.15)",
-            transition: "filter 0.44s cubic-bezier(.7,.05,.93,1.07)",
-            borderRadius: 18,
-            background: "#e7e3f3",
-            userSelect: "none",
-            pointerEvents: "none",
-          }}
-          draggable={false}
-        />
-      ) : (
-        <span
-          style={{
-            color: "#d0b7df",
-            fontSize: 80,
-            width: "100%",
-            textAlign: "center",
-            userSelect: "none",
-            display: "block",
-          }}
-        >
-          🎬
-        </span>
-      )}
-    </div>
-  );
-}
+const MAX_ROUNDS = 18;
+const POSTER_BASE = "https://image.tmdb.org/t/p/w342";
 
-function cleanAnswer(s = "") {
-  // Remove punctuation, extra space, lower-case
-  return s
-    .replace(/[^\w\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+function normalizeTitle(s) {
+  // Lowercase, remove punctuation, excessive whitespace for forgiving answer check
+  return (s || "")
+    .toLowerCase()
+    .replace(/[\W_]+/g, "")
+    .trim();
 }
 
 export default function FilmDetective() {
-  const [region, setRegion] = useState("US"); // "US" or "IN"
-  const [quiz, setQuiz] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [score, setScore] = useState(0);
-  const [played, setPlayed] = useState(0);
-  const [input, setInput] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [revealed, setRevealed] = useState(false);
-  const [error, setError] = useState("");
-  const [sessionIds, setSessionIds] = useState([]); // Prevent repeats
-  const [showScore, setShowScore] = useState(false);
+  // "US" (Hollywood/English) vs. "IN" (Kollywood/Tamil) section selection
+  const [region, setRegion] = useState("US");
+  const [gameState, setGameState] = useState({
+    loading: false,
+    error: "",
+    question: null,         // { movie, actor, year, poster }
+    answer: "",
+    feedback: null,         // "correct"|"wrong"|null
+    reveal: false,
+    round: 1,
+    score: 0,
+    finished: false,
+    skipped: 0,
+    usedMovieIds: []
+  });
+  const answerInputRef = useRef();
 
-  // Load the next quiz round
-  const loadQuiz = useCallback(
-    async (first = false) => {
-      setLoading(true);
-      setQuiz(null);
-      setInput("");
-      setFeedback("");
-      setRevealed(false);
-      setError("");
-      let exclude = first ? [] : [...sessionIds];
+  // Loader for new round (private, robust to TMDB slowness/gaps)
+  async function loadNextQuestion(prevState) {
+    // Avoid replaying the same movie in a session
+    let attempts = 0;
+    let movie = null;
+    let credits = null;
+    let details = null;
+    let actorName = "";
+    let year = "";
+    let movieLang = region === "US" ? "en" : "ta";
+
+    while (attempts < 9 && (!movie || !movie.poster_path || !(movie.original_language === movieLang || movieLang === "en"))) {
       try {
-        const round = await getDetectiveQuizRound(region, exclude);
-        if (!round) {
-          setError("Could not fetch movie round. Retry?");
-          setLoading(false);
-          setQuiz(null);
-          return;
+        // Discover random movie, sorted by popularity, with poster
+        const page = 1 + Math.floor(Math.random() * 4); // less common as round progresses
+        const discover = await fetchMoviesByRegion(region, { page });
+        if (!discover || !discover.results || !discover.results.length) {
+          // Try next
+          attempts++;
+          continue;
         }
-        setQuiz(round);
-        setSessionIds((ids) =>
-          first ? [round.id] : [...ids, round.id].slice(-MAX_QUESTIONS * 2)
-        );
-        setLoading(false);
-      } catch (e) {
-        setError("Network error. Please retry.");
-        setLoading(false);
+        let candidate = discover.results[
+          Math.floor(Math.random() * discover.results.length)
+        ];
+        // Skip if no poster, title, or already played this one
+        if (
+          !candidate ||
+          !candidate.poster_path ||
+          !candidate.title ||
+          prevState.usedMovieIds.includes(candidate.id)
+        ) {
+          attempts++;
+          continue;
+        }
+        // Fetch details and credits for proper actor/year
+        [details, credits] = await Promise.all([
+          fetchMovieDetails(candidate.id, {
+            language: region === "US" ? "en-US" : "ta-IN"
+          }),
+          fetchMovieCredits(candidate.id)
+        ]);
+        if (!details || !credits) {
+          attempts++;
+          continue;
+        }
+        // Extract release year & main actor if available
+        year = (details.release_date || candidate.release_date || "").slice(0, 4);
+        // Top-billed actor: first 'cast' person, or fallback to 2nd, or blank
+        if (credits.cast && credits.cast.length) {
+          actorName = credits.cast[0].name || "";
+          // Ultra-rare: If the top-billed has a single Tamil name, fallback to next for Kollywood to avoid odd API picks
+          if (
+            region === "IN" &&
+            actorName &&
+            !actorName.includes(" ") &&
+            credits.cast.length > 1
+          ) {
+            actorName += ` / ${credits.cast[1].name || ""}`;
+          }
+        } else {
+          actorName = "";
+        }
+        // Accept only movies with a main actor and year, else retry
+        if (actorName && year) {
+          movie = candidate;
+          break;
+        }
+      } catch {
+        attempts++;
+        continue;
       }
-    },
-    [region, sessionIds]
-  );
+    }
+    if (!movie) {
+      throw new Error("Could not fetch a suitable movie for this round (try again)");
+    }
 
-  // On mount or region change, start over
+    return {
+      movie,
+      actor: actorName,
+      year,
+      poster: movie.poster_path ? POSTER_BASE + movie.poster_path : null,
+      movieTitle: movie.title,
+      movieId: movie.id
+    };
+  }
+
+  // Start/restart a fresh game
+  function resetGame(section) {
+    setRegion(section === "IN" ? "IN" : "US");
+    setGameState({
+      loading: true,
+      error: "",
+      question: null,
+      answer: "",
+      feedback: null,
+      reveal: false,
+      round: 1,
+      score: 0,
+      finished: false,
+      skipped: 0,
+      usedMovieIds: []
+    });
+  }
+
+  // For each next/first round
   useEffect(() => {
-    setScore(0);
-    setPlayed(0);
-    setShowScore(false);
-    setSessionIds([]);
-    setTimeout(() => {
-      loadQuiz(true);
-    }, 300);
+    let cancelled = false;
+    async function setupQuestion() {
+      setGameState(g => ({ ...g, loading: true, error: "", reveal: false, feedback: null, answer: "" }));
+      try {
+        const q = await loadNextQuestion(gameState);
+        if (!cancelled) {
+          setGameState(g => ({
+            ...g,
+            loading: false,
+            error: "",
+            answer: "",
+            reveal: false,
+            feedback: null,
+            question: q,
+            usedMovieIds: [...(g.usedMovieIds || []), q.movieId]
+          }));
+          // Focus answer input on load
+          setTimeout(() => answerInputRef.current && answerInputRef.current.focus(), 220);
+        }
+      } catch (err) {
+        setGameState(g => ({
+          ...g,
+          loading: false,
+          error: err.message || "Could not fetch movie. Try again?",
+          question: null
+        }));
+      }
+    }
+    if (!gameState.finished) {
+      setupQuestion();
+    }
     // eslint-disable-next-line
-  }, [region]);
-
-  // On new round, auto-focus input
-  useEffect(() => {
-    if (quiz && !loading) {
-      setTimeout(() => {
-        try {
-          document.getElementById("detective-input")?.focus();
-        } catch {}
-      }, 120);
-    }
-  }, [quiz, loading]);
-
-  // After answer/reveal, end or advance
-  useEffect(() => {
-    if (
-      feedback &&
-      (!revealed && !error) &&
-      played < MAX_QUESTIONS &&
-      quiz
-    ) {
-      // Go to next after short pause
-      const timeout = setTimeout(() => {
-        setQuiz(null);
-        setFeedback("");
-        setInput("");
-        setRevealed(false);
-        loadQuiz();
-        setPlayed((n) => n + 1);
-      }, feedback.startsWith("🎉") ? 1300 : 1800);
-      return () => clearTimeout(timeout);
-    }
-
-    // If last question, show score after delay
-    if (
-      (feedback && played + 1 >= MAX_QUESTIONS) ||
-      (revealed && played + 1 >= MAX_QUESTIONS)
-    ) {
-      const timeout = setTimeout(() => {
-        setShowScore(true);
-      }, 1050);
-      return () => clearTimeout(timeout);
-    }
+    return () => { cancelled = true; };
+    // Only reset on round/region change/start/replay
     // eslint-disable-next-line
-  }, [feedback, revealed]);
+  }, [region, gameState.round, gameState.finished]);
 
-  // Handle typed answer submit
+  // Check answer logic
+  function checkAnswer() {
+    if (!gameState.question) return false;
+    const correct = gameState.question.movieTitle;
+    // Accept title or original title, forgiving whitespace/punctuation/case
+    return (
+      normalizeTitle(gameState.answer) === normalizeTitle(correct) ||
+      normalizeTitle(gameState.answer) === normalizeTitle(gameState.question.movie.original_title)
+    );
+  }
+
+  // On answer submit
   function handleSubmit(e) {
     e.preventDefault();
-    if (!quiz || !input || !!feedback || !!error || revealed) return;
-    const guess = cleanAnswer(input);
-    const answer = cleanAnswer(quiz.title);
-    if (guess === answer) {
-      setFeedback("🎉 Correct!");
-      setScore((n) => n + 1);
-    } else {
-      setFeedback(`❌ Wrong! The answer was: "${quiz.title}"`);
-    }
-    setPlayed((n) => n + 1);
-  }
+    if (!gameState.question || gameState.finished || gameState.feedback || gameState.loading) return;
 
-  // Handle skip or reveal
-  function handleReveal() {
-    setRevealed(true);
-    setFeedback(""); // erase typed feedback
-    setPlayed((n) => n + 1);
-  }
-
-  // Reset and replay
-  function handleReplay() {
-    setScore(0);
-    setPlayed(0);
-    setShowScore(false);
-    setSessionIds([]);
-    setRevealed(false);
-    setInput("");
-    setFeedback("");
-    setQuiz(null);
-    setError("");
+    const isCorrect = checkAnswer();
+    setGameState(g => ({
+      ...g,
+      feedback: isCorrect ? "correct" : "wrong",
+      score: isCorrect ? g.score + 1 : g.score,
+      reveal: !isCorrect,
+      skipped: g.skipped,
+      finished: g.round >= MAX_ROUNDS,
+    }));
+    // After 700-1100ms show next, unless last round
     setTimeout(() => {
-      loadQuiz(true);
-    }, 320);
+      if (gameState.round >= MAX_ROUNDS) {
+        setGameState(g => ({ ...g, finished: true, feedback: null, reveal: true }));
+      } else {
+        setGameState(g => ({
+          ...g,
+          round: g.round + 1,
+          feedback: null,
+          answer: "",
+          reveal: false,
+        }));
+      }
+    }, isCorrect ? 900 : 1250);
   }
 
-  const mainColor = "#973caa";
-  const subColor = "#763195";
+  // Reveal/skip button logic
+  function handleReveal() {
+    if (!gameState.question || gameState.reveal || gameState.finished) return;
+    setGameState(g => ({
+      ...g,
+      reveal: true,
+      feedback: "skipped",
+      skipped: g.skipped + 1,
+      finished: g.round >= MAX_ROUNDS
+    }));
+    setTimeout(() => {
+      if (gameState.round >= MAX_ROUNDS) {
+        setGameState(g => ({ ...g, finished: true, feedback: null, reveal: true }));
+      } else {
+        setGameState(g => ({
+          ...g,
+          round: g.round + 1,
+          feedback: null,
+          answer: "",
+          reveal: false,
+        }));
+      }
+    }, 1200);
+  }
 
-  // --- UI styles ---
+  // Start game or replay
+  function handleReplay() {
+    resetGame(region);
+  }
+
+  // UI styles
   const styles = {
     container: {
-      maxWidth: 550,
-      margin: "46px auto 0",
+      maxWidth: 530,
+      margin: "50px auto 0",
       background: "#fff",
       borderRadius: 22,
-      boxShadow: "0 6px 28px 0 rgba(151,60,170,.098)",
+      boxShadow: "0 6px 28px 0 rgba(151,60,170,.08)",
       padding: "38px 18px 32px",
       minHeight: 350,
-      animation: "fadeInPop 0.5s",
-    },
-    title: {
-      color: mainColor,
-      margin: "0 0 10px",
-      letterSpacing: ".011em",
-      textShadow: "0 2px 13px #973caa18",
-      fontWeight: 700,
+      animation: "fadeInPop 0.5s"
     },
     regionBar: {
       display: "flex",
       gap: 10,
-      marginBottom: 17,
-      marginTop: 6,
+      marginBottom: 15,
+      marginTop: 2
     },
-    btn: (active) => ({
-      background: active ? mainColor : "#edeafa",
-      color: active ? "#fff" : subColor,
-      fontWeight: active ? 700 : 600,
-      border: active
-        ? `2px solid ${mainColor}`
-        : "2px solid #edeafa",
-      padding: "7px 19px",
-      minWidth: 102,
-      borderRadius: 8,
-      cursor: active ? "default" : "pointer",
+    btn: isActive => ({
+      background: isActive ? "#973caa" : "#edeafa",
+      color: isActive ? "#fff" : "#763195",
+      fontWeight: isActive ? 700 : 600,
+      border: isActive ? "2px solid #973caa" : "2px solid #edeafa",
+      padding: "8px 16px",
+      minWidth: 110,
+      borderRadius: 6,
+      cursor: isActive ? "default" : "pointer"
     }),
-    cluesRow: {
+    viewer: {
       display: "flex",
-      flexDirection: "row",
-      gap: 22,
-      justifyContent: "center",
-      margin: "21px 0 11px 0",
+      flexDirection: "column",
       alignItems: "center",
+      gap: 18,
+      margin: "24px 0 16px"
     },
+    posterBlur: show =>
+      show
+        ? {
+            width: 170,
+            height: 250,
+            objectFit: "cover",
+            borderRadius: 17,
+            filter: "blur(17px) brightness(1.06) grayscale(0.23)",
+            boxShadow: "0 4px 17px 0 rgba(151,60,170,0.09)",
+            margin: "0 auto 0"
+          }
+        : {
+            width: 170,
+            height: 250,
+            objectFit: "cover",
+            borderRadius: 17,
+            filter: "none",
+            boxShadow: "0 4px 17px 0 rgba(151,60,170,0.07)"
+          },
     clue: {
       background: "#edeafa",
-      borderRadius: 13,
-      padding: "19px 17px",
-      fontWeight: 700,
       color: "#481d77",
-      fontSize: "1.16rem",
-      boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.09)",
-      minWidth: 120,
-      textAlign: "center",
+      fontWeight: 650,
+      fontSize: "1.09rem",
+      padding: "8px 17px",
+      borderRadius: 11,
       letterSpacing: ".011em",
-      userSelect: "none",
-    },
-    posterBox: {
-      margin: "8px 0 0 0",
-      textAlign: "center",
+      margin: "7px 0"
     },
     form: {
       display: "flex",
       flexDirection: "row",
-      gap: 12,
-      margin: "19px 0 3px",
-      alignItems: "center",
-      justifyContent: "center",
+      gap: 13,
+      margin: "14px 0 7px"
     },
     input: {
-      width: 186,
-      maxWidth: 252,
+      width: 170,
       fontWeight: 590,
-      fontSize: "1.13rem",
-      padding: "10px 15px",
-      border: "2px solid #e7e3f3",
-      borderRadius: 8,
-      outline: "none",
-      background: "#fff",
-      color: "#151414",
+      fontSize: "1.09rem",
+      borderRadius: 7,
+      padding: "10px 12px",
+      border: "2px solid #e7e3f3"
+    },
+    feedback: flag => ({
+      color:
+        flag === "correct"
+          ? "#24974e"
+          : flag === "wrong"
+          ? "#db3662"
+          : flag === "skipped"
+          ? "#c29817"
+          : "#666",
+      fontWeight: 700,
+      fontSize: "1.11rem",
+      minHeight: 26,
+      margin: "8px 0 2px",
+      textAlign: "center"
+    }),
+    revealBtn: {
+      background: "#fffdfa",
+      border: "1.5px dashed #c8b9db",
+      color: "#973caa",
+      padding: "7px 13px",
+      borderRadius: 12,
+      fontWeight: 700,
+      fontSize: ".97rem",
+      margin: "4px 0",
+      cursor: "pointer",
+      textDecoration: "underline"
     },
     score: {
       fontWeight: 700,
-      color: mainColor,
-      fontSize: "1.08rem",
-      margin: "0 0 12px",
-      letterSpacing: ".009em",
-    },
-    revealBtn: {
-      background: "#fffdfa",
-      border: "1.6px dashed #c8b9db",
-      color: mainColor,
-      padding: "8px 14px",
-      borderRadius: 12,
-      fontWeight: 700,
-      fontSize: ".98rem",
-      cursor: "pointer",
-      textDecoration: "underline",
-      marginLeft: 4,
-      transition: "background .17s",
-    },
-    feedback: (isRight) => ({
-      color: isRight ? "#24974e" : "#db3662",
-      fontWeight: 700,
-      fontSize: "1.14rem",
-      textAlign: "center",
-      minHeight: 28,
-      letterSpacing: ".007em",
-      marginTop: 8,
-      marginBottom: 3,
-      animation: "subtlePop 380ms cubic-bezier(.48,1.2,.64,1.05) 0.08s 1 both",
-    }),
-    movieReveal: {
-      marginTop: 13,
-      background: "#edeafa",
-      padding: "13px 16px",
-      borderRadius: 12,
-      color: "#481d77",
-      fontWeight: 700,
-      fontSize: "1.09rem",
-      boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.07)",
-      textAlign: "center",
-    },
-    scoreScreen: {
-      background: "#edeafa",
-      borderRadius: 15,
-      padding: "32px 13px 27px",
-      boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.09)",
-      textAlign: "center",
-      margin: "36px auto 16px",
-      maxWidth: 370,
-      animation: "fadeInPop 0.54s cubic-bezier(.41,.81,.52,1)",
-    },
-    stats: {
-      fontWeight: 700,
-      color: "#763195",
-      fontSize: "1.16rem",
-      margin: "9px 0 8px",
-    },
-    hintText: {
-      margin: "23px 0 5px",
-      color: "#a58cc2",
-      fontSize: ".98rem",
-      textAlign: "center",
-      fontWeight: 500,
-      letterSpacing: ".008em",
-    },
+      color: "#973caa",
+      fontSize: "1.05rem",
+      margin: "0 0 10px",
+      letterSpacing: ".009em"
+    }
   };
 
+  // Helper for plural
+  const roundLabel =
+    gameState.finished || gameState.round > MAX_ROUNDS
+      ? `Session Complete`
+      : `Question ${gameState.round} of ${MAX_ROUNDS}`;
+
+  // Main render
   return (
     <div className="game-container" style={styles.container}>
       <BackButton />
-      <h2 className="title" style={styles.title}>
+      <h2 className="title" style={{ color: "#973caa", margin: "0 0 12px" }}>
         Film Detective
       </h2>
+      {/* Section switcher */}
       <div style={styles.regionBar}>
         <button
           className="btn"
           style={styles.btn(region === "US")}
-          onClick={() => setRegion("US")}
-          disabled={region === "US" && !showScore}
+          onClick={() => resetGame("US")}
+          disabled={region === "US" && !gameState.finished}
           type="button"
         >
           Hollywood
@@ -455,164 +402,203 @@ export default function FilmDetective() {
         <button
           className="btn"
           style={styles.btn(region === "IN")}
-          onClick={() => setRegion("IN")}
-          disabled={region === "IN" && !showScore}
+          onClick={() => resetGame("IN")}
+          disabled={region === "IN" && !gameState.finished}
           type="button"
         >
           Kollywood
         </button>
       </div>
-      <div style={styles.score}>
-        Score: {score} / {played} (Max: {MAX_QUESTIONS})
+      <div style={styles.score} aria-live="polite">
+        Score: {gameState.score} / {Math.max(gameState.round - (gameState.finished ? 0 : 1), 0)}
+        &nbsp;&nbsp;{roundLabel}
       </div>
-      {showScore ? (
-        <div style={styles.scoreScreen} className="subtle-pop" aria-label="Quiz End Score">
+      {gameState.error && <ErrorToast message={gameState.error} />}
+      {gameState.loading && (
+        <div style={{ margin: "26px 0 22px", textAlign: "center" }}>
+          <Loader size={34} />
+        </div>
+      )}
+      {/* Game Complete screen */}
+      {gameState.finished && (
+        <div
+          style={{
+            background: "#edeafa",
+            borderRadius: 15,
+            padding: "36px 11px 28px",
+            boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.095)",
+            textAlign: "center",
+            margin: "36px auto 17px",
+            maxWidth: 390,
+            animation: "fadeInPop 0.51s cubic-bezier(.41,.81,.52,1)",
+          }}
+          className="subtle-pop"
+          aria-label="Quiz End Score"
+        >
           <div
             style={{
-              fontSize: "1.47rem",
+              fontSize: "1.48rem",
               fontWeight: 900,
               color: "#973caa",
               letterSpacing: ".012em",
-              marginBottom: 8,
+              marginBottom: 5,
             }}
           >
-            🎉 Detective Session Complete!
+            🎬 All rounds done!
           </div>
-          <div style={styles.stats}>
-            Final Score: <span style={{ color: "#24974e" }}>{score}</span> / {MAX_QUESTIONS}
+          <div style={{ fontWeight: 700, color: "#763195", fontSize: "1.19rem", margin: "13px 0" }}>
+            Final Score: <span style={{ color: "#24974e" }}>{gameState.score}</span> / {MAX_ROUNDS}
           </div>
-          <div style={{ margin: "9px 0 20px", color: "#8e83a2", fontSize: ".99rem" }}>
-            {score === MAX_QUESTIONS
-              ? "Amazing cinema sleuthing – you nailed them all!"
-              : score >= 13
-              ? "Great job! Your film IQ is superb."
-              : score >= 7
-              ? "Solid work—try for an even higher score next time!"
-              : "Keep practicing! You'll be a movie detective soon."}
+          <div style={{ margin: "10px 0 18px", color: "#8e83a2", fontSize: ".99rem" }}>
+            {gameState.score === MAX_ROUNDS
+              ? "Detective-level expertise! 🔍"
+              : gameState.score >= 13
+              ? "Impressive eye for movies!"
+              : gameState.score >= 7
+              ? "Solid effort – train your cinematic skills!"
+              : "Try again to crack more clues."}
           </div>
           <button
             className="btn btn-large"
-            style={{ fontWeight: 700, marginBottom: 8, fontSize: "1.13rem" }}
+            style={{ fontWeight: 700, marginBottom: 7, fontSize: "1.13rem" }}
             onClick={handleReplay}
           >
             Play Again
           </button>
         </div>
-      ) : (
-        <>
-          {error && <ErrorToast message={error} />}
-          {loading && (
-            <div style={{ margin: "28px 0 16px", textAlign: "center" }}>
-              <Loader size={36} />
-            </div>
-          )}
-          {!loading && quiz && (
-            <>
-              <div style={styles.posterBox}>
-                <BlurredPoster
-                  src={
-                    quiz.poster_path ? POSTER_BASE + quiz.poster_path : null
-                  }
-                  alt={quiz.title || "Blurred movie poster"}
-                />
-              </div>
-              <div style={styles.cluesRow}>
-                <div style={styles.clue}>
-                  <span style={{ color: "#763195" }}>Hero</span>
-                  <br />
-                  <span style={{ color: "#973caa" }}>{quiz.hero}</span>
-                </div>
-                <div style={styles.clue}>
-                  <span style={{ color: "#763195" }}>Year</span>
-                  <br />
-                  <span style={{ color: "#973caa" }}>{quiz.year}</span>
-                </div>
-              </div>
-              <form
-                style={styles.form}
-                onSubmit={handleSubmit}
-                autoComplete="off"
-              >
-                <input
-                  id="detective-input"
-                  className="input"
-                  placeholder="Type movie title"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={!!feedback || !!revealed}
-                  autoFocus
-                  style={styles.input}
-                  aria-label="Your answer"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  inputMode="text"
-                />
-                <button
-                  className="btn"
-                  type="submit"
-                  disabled={!!feedback || !!revealed}
-                  style={{ padding: "10px 22px", fontWeight: 700 }}
-                >
-                  {feedback || revealed ? "✓" : "Submit"}
-                </button>
-                <button
-                  type="button"
-                  style={styles.revealBtn}
-                  onClick={handleReveal}
-                  disabled={!!revealed}
-                  aria-label="Reveal Answer"
-                >
-                  Reveal Answer
-                </button>
-              </form>
-              {/* Feedback after guess */}
-              {(feedback || revealed) && (
-                <div
-                  style={styles.feedback(
-                    feedback.startsWith("🎉") ||
-                      revealed
-                  )}
-                  className="subtle-pop"
-                  aria-live="polite"
-                >
-                  {revealed
-                    ? (
-                        <>
-                          <span style={{ color: mainColor, fontWeight: 700 }}>
-                            The answer is: "{quiz.title}"
-                          </span>
-                        </>
-                      )
-                    : feedback}
-                </div>
-              )}
-              {/* Show actual answer as movie detail box if revealed or after submit */}
-              {(feedback || revealed) && (
-                <div style={styles.movieReveal}>
-                  <span style={{ color: mainColor }}>{quiz.title}</span>{" "}
-                  {quiz.year && <span>({quiz.year})</span>}
-                </div>
-              )}
-              <div style={styles.hintText}>
-                Guess the movie title from the clues and the blurred poster.
-                <br />
-                <span style={{ color: "#b7a2cf" }}>
-                  Stuck? Reveal the answer for help. {played + 1} of {MAX_QUESTIONS}
-                </span>
-              </div>
-            </>
-          )}
-          {!loading && !quiz && !error && (
-            <div style={{ margin: "20px 0", color: "#c75e77" }}>
-              Oops, unable to load a round.{" "}
-              <button className="btn" onClick={() => loadQuiz()} style={{fontWeight:700}}>
-                Retry
-              </button>
-            </div>
-          )}
-        </>
       )}
+      {/* Active round */}
+      {!gameState.loading && gameState.question && !gameState.finished && (
+        <div style={styles.viewer}>
+          {/* Poster, blurred or clear depending on reveal/feedback */}
+          <div style={{ position: "relative" }}>
+            {gameState.question.poster ? (
+              <img
+                src={gameState.question.poster}
+                alt="Blurred movie poster clue"
+                style={
+                  !gameState.reveal && !["correct", "wrong"].includes(gameState.feedback)
+                    ? styles.posterBlur(true)
+                    : styles.posterBlur(false)
+                }
+                aria-label="Movie Poster (blurred)"
+              />
+            ) : (
+              <div
+                style={{
+                  ...styles.posterBlur(true),
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#c8b9db",
+                  fontSize: "2.1rem"
+                }}
+                aria-label="No Movie Poster"
+              >
+                🎞️
+              </div>
+            )}
+            {/* reveal badge */}
+            {gameState.reveal && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: 8,
+                  right: 13,
+                  background: "#973caa",
+                  color: "#fff",
+                  padding: "2.5px 7px",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  fontSize: ".97rem",
+                  boxShadow: "0 2px 10px 0 rgba(151,60,170,0.10)"
+                }}
+              >
+                Reveal
+              </span>
+            )}
+          </div>
+          {/* Clue: Hero/actor, year */}
+          <div style={styles.clue}>
+            <span style={{ color: "#763195" }}>Hero:</span>{" "}
+            <span style={{ fontWeight: 780 }}>{gameState.question.actor}</span>
+            {"  "} &bull; {"  "}
+            <span style={{ color: "#c1961c" }}>Year:</span>{" "}
+            <span style={{ fontWeight: 780 }}>{gameState.question.year}</span>
+          </div>
+          {/* Answer form */}
+          <form onSubmit={handleSubmit} style={styles.form} autoComplete="off">
+            <input
+              className="input"
+              style={styles.input}
+              ref={answerInputRef}
+              disabled={
+                !!gameState.feedback || !gameState.question || gameState.reveal
+              }
+              placeholder="Enter movie title"
+              aria-label="Type your answer"
+              value={gameState.answer}
+              onChange={e =>
+                setGameState(g => ({
+                  ...g,
+                  answer: e.target.value,
+                  feedback: null
+                }))
+              }
+              autoFocus
+            />
+            <button
+              className="btn"
+              type="submit"
+              disabled={
+                !!gameState.feedback ||
+                !gameState.answer.trim() ||
+                gameState.reveal
+              }
+              style={{ padding: "10px 19px", fontWeight: 700 }}
+            >
+              {gameState.feedback === "correct"
+                ? "✓"
+                : gameState.feedback === "wrong"
+                ? "✗"
+                : "Submit"}
+            </button>
+            <button
+              type="button"
+              style={styles.revealBtn}
+              onClick={handleReveal}
+              disabled={gameState.reveal || !!gameState.feedback}
+              aria-label="Reveal Answer"
+            >
+              {!gameState.reveal ? "Reveal Answer" : "Revealed"}
+            </button>
+          </form>
+          {/* Feedback & correct answer */}
+          {(gameState.feedback || gameState.reveal) && (
+            <div style={styles.feedback(gameState.feedback)} aria-live="polite">
+              {gameState.feedback === "correct"
+                ? "🎉 Correct!"
+                : gameState.feedback === "wrong"
+                ? `❌ Wrong! The answer was: ${gameState.question.movieTitle}`
+                : gameState.feedback === "skipped"
+                ? `⏭️ Revealed! The answer was: ${gameState.question.movieTitle}`
+                : null}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Session stats and instructions */}
+      <div
+        style={{
+          marginTop: 14,
+          color: "#a58cc2",
+          fontSize: ".97rem",
+          textAlign: "center"
+        }}
+      >
+        Guess the movie by its blurred poster! Clues: hero/top-billed actor and release year.
+        Need help? Use "Reveal Answer" to skip to the next round (max 18).
+      </div>
     </div>
   );
 }
