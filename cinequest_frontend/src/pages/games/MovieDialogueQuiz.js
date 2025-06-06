@@ -1,16 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { getRandomDialogueQuiz } from "../../tmdbGameUtils";
 import GameCard from "../../components/GameCard";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
+import { fetchMoviesByRegion } from "../../tmdbApi";
 
-/**
- * PUBLIC_INTERFACE
- * MovieDialogueQuiz - TMDB-powered multiple-choice quiz.
- * - Fetches a random TMDB movie (Hollywood/Kollywood).
- * - Uses tagline or overview as a "quote".
- * - User must select the correct movie among distractors.
- */
+// PUBLIC_INTERFACE
+// MovieDialogueQuiz - TMDB-powered multiple-choice quiz.
+// - Fetches a random TMDB movie (Hollywood/Kollywood).
+// - Uses tagline or overview as a "quote".
+// - User must select the correct movie among distractors.
 export default function MovieDialogueQuiz() {
   const [region, setRegion] = useState("US");
   const [round, setRound] = useState(null);
@@ -21,6 +19,86 @@ export default function MovieDialogueQuiz() {
   const [score, setScore] = useState(0);
   const [played, setPlayed] = useState(0);
 
+  // Helper: fetch random movies from TMDB for the quiz round
+  async function getRandomQuizRound(region = "US", decoyCount = 3) {
+    let tries = 0;
+    let movie = null;
+    // Try to fetch a random movie with a tagline or overview
+    while (!movie && tries < 7) {
+      try {
+        const page = 1 + Math.floor(Math.random() * 5);
+        const res = await fetchMoviesByRegion(region, { page });
+        if (!res || !res.results) break;
+        // Find a suitable movie with tagline or overview
+        const candidates = res.results.filter(
+          (m) =>
+            m &&
+            m.title &&
+            ((typeof m.tagline === "string" && m.tagline.length > 12) ||
+              (typeof m.overview === "string" && m.overview.length > 18)) &&
+            m.title.length > 4
+        );
+        if (candidates.length === 0) {
+          tries++;
+          continue;
+        }
+        movie = candidates[Math.floor(Math.random() * candidates.length)];
+      } catch {
+        break;
+      }
+      tries++;
+    }
+    if (!movie) return null;
+
+    // Select the quiz 'quote'
+    let text =
+      movie.tagline && movie.tagline.length > 12
+        ? movie.tagline
+        : movie.overview;
+
+    // Fetch decoy (incorrect) movies
+    let decoys = [];
+    let decoyAttempts = 0;
+    while (decoys.length < decoyCount && decoyAttempts < 8) {
+      try {
+        const page = 1 + Math.floor(Math.random() * 5);
+        const res = await fetchMoviesByRegion(region, { page });
+        if (!res || !res.results) break;
+        for (const m of res.results) {
+          if (
+            m.id !== movie.id &&
+            m.title &&
+            m.title.length > 4 &&
+            !decoys.find((d) => d.id === m.id)
+          ) {
+            decoys.push(m);
+          }
+          if (decoys.length === decoyCount) break;
+        }
+      } catch {
+        break;
+      }
+      decoyAttempts++;
+    }
+    // Compose and shuffle choices
+    const allChoices = shuffleArray([movie, ...decoys.slice(0, decoyCount)]);
+    return {
+      text,
+      answer: movie,
+      choices: allChoices,
+    };
+  }
+
+  // Fisher-Yates shuffle
+  function shuffleArray(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   // Fetch new quiz question
   async function loadRound() {
     setLoading(true);
@@ -28,10 +106,11 @@ export default function MovieDialogueQuiz() {
     setSelected(null);
     setFeedback(null);
     try {
-      const data = await getRandomDialogueQuiz(region, 3);
+      const data = await getRandomQuizRound(region, 3);
       if (!data) {
         setErrMsg("Could not fetch a quiz round (try again).");
         setRound(null);
+        setLoading(false);
       } else {
         setRound(data);
         setLoading(false);
@@ -41,10 +120,9 @@ export default function MovieDialogueQuiz() {
       setRound(null);
       setLoading(false);
     }
-    setLoading(false);
   }
 
-  // Load when region changes or on mount
+  // Load new round when region changes or on mount
   useEffect(() => {
     loadRound();
     // eslint-disable-next-line
@@ -54,9 +132,9 @@ export default function MovieDialogueQuiz() {
   function handleChoose(movie) {
     if (selected) return;
     setSelected(movie);
-    setPlayed(played + 1);
+    setPlayed((p) => p + 1);
     if (movie.id === round.answer.id) {
-      setScore(score + 1);
+      setScore((s) => s + 1);
       setFeedback("correct");
       setTimeout(() => {
         loadRound();
