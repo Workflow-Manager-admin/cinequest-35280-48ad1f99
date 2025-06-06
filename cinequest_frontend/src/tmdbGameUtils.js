@@ -1,6 +1,4 @@
-//
 // Utility functions for CineQuest games - original version, with basic helpers only
-//
 
 /**
  * PUBLIC_INTERFACE

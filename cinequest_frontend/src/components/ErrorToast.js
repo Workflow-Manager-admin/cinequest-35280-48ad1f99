@@ -1,24 +1,23 @@
 import React from "react";
 
-// Lively error toast for forms and feedback
+// PUBLIC_INTERFACE
+// ErrorToast - simple error display (original version), strong background.
 export default function ErrorToast({ message }) {
   if (!message) return null;
   return (
     <div
       style={{
-        background: "var(--error-bg)",
-        color: "var(--error-text)",
-        padding: "11px 20px",
-        borderRadius: 9,
-        margin: "8px 0",
+        background: "#ffe8ee",
+        color: "#aa1645",
+        padding: "10px 17px",
+        borderRadius: 8,
+        margin: "7px 0",
         fontWeight: 600,
         textAlign: "center",
-        border: "1.5px solid var(--error-text)",
-        fontSize: "1.02rem",
-        boxShadow: "0 2px 16px 0 rgba(198,42,88,0.06)"
+        border: "1.1px solid #d34b4b",
+        fontSize: "1.01rem",
       }}
       aria-live="polite"
-      className="fade-in subtle-pop"
     >
       {message}
     </div>

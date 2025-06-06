@@ -18,11 +18,14 @@ export default function Loader({ size = 24 }) {
   );
 }
 
-// CSS animation
-const style = document.createElement("style");
-style.innerHTML = `
+// CSS animation for original v1 loader (append only once)
+if (typeof window !== "undefined" && !window.__cinequest_loader_css) {
+  window.__cinequest_loader_css = true;
+  const style = document.createElement("style");
+  style.innerHTML = `
 @keyframes spin {
   0% { transform:rotate(0deg);}
   100% { transform:rotate(360deg);}
 }`;
-document.head.appendChild(style);
+  document.head.appendChild(style);
+}
