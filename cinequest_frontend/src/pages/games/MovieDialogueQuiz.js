@@ -459,8 +459,12 @@ export default function MovieDialogueQuiz() {
                 >
                   {feedback === "correct"
                     ? "🎉 Correct!"
-                    : `❌ Wrong! The answer was: ${round.answer.title}`}
+                    : `❌ Wrong!`}
                 </div>
+              )}
+              {/* Answer revealed only if 'Reveal Answer' is triggered */}
+              {selected && feedback !== "correct" && feedback !== "wrong" && round && (
+                <></>
               )}
               <div style={{ marginTop: 14, color: "#a58cc2", fontSize: ".99rem", textAlign: "center" }}>
                 {played < MAX_QUESTIONS

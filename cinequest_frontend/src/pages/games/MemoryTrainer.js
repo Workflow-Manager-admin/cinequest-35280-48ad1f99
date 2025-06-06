@@ -555,10 +555,13 @@ export default function MemoryTrainer() {
                       </span>
                     </div>
                   )}
-                  <div style={styles.titleBox}>
-                    <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
-                    {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
-                  </div>
+                  {/* Reveal Answer section -- only shows after reveal/skipped or correct answer */}
+                  {revealed && (
+                    <div style={styles.titleBox}>
+                      <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
+                      {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
+                    </div>
+                  )}
                 </>
               )}
             </>

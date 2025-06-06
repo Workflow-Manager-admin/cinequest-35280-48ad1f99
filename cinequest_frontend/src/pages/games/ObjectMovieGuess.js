@@ -570,6 +570,10 @@ export default function ObjectMovieGuess() {
               )}
               {/* Movie/Year Reveal after answer */}
               {answered && (
+                <></>
+              )}
+              {/* Only show answer after explicit reveal button */}
+              {!answered && hintReveal && round && (
                 <div
                   style={{
                     marginTop: 10,

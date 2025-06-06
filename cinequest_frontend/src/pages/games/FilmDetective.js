@@ -573,16 +573,35 @@ export default function FilmDetective() {
               {!gameState.reveal ? "Reveal Answer" : "Revealed"}
             </button>
           </form>
-          {/* Feedback & correct answer */}
-          {(gameState.feedback || gameState.reveal) && (
+          {/* Feedback */}
+          {gameState.feedback && (
             <div style={styles.feedback(gameState.feedback)} aria-live="polite">
               {gameState.feedback === "correct"
                 ? "🎉 Correct!"
                 : gameState.feedback === "wrong"
-                ? `❌ Wrong! The answer was: ${gameState.question.movieTitle}`
+                ? `❌ Wrong!`
                 : gameState.feedback === "skipped"
-                ? `⏭️ Revealed! The answer was: ${gameState.question.movieTitle}`
+                ? `⏭️ Revealed!`
                 : null}
+            </div>
+          )}
+          {/* Reveal Answer (only after button click) */}
+          {gameState.reveal && (
+            <div
+              style={{
+                background: "#edeafa",
+                padding: "10px 13px",
+                borderRadius: 13,
+                color: "#481d77",
+                fontWeight: 600,
+                boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
+                fontSize: ".98rem",
+                textAlign: "center",
+                marginTop: 7,
+              }}
+            >
+              <span style={{ color: "#973caa" }}>{gameState.question.movieTitle}</span>
+              {gameState.question.year ? ` (${gameState.question.year})` : ""}
             </div>
           )}
         </div>
