@@ -169,7 +169,8 @@ async function getStrictObjectCluesRound(region = "US") {
  * and only visually or physically present elements.
  */
 export default function ObjectMovieGuess() {
-  // State hooks
+  // Implements 18-question session limit, score screen, progress, and robust replay/reset.
+  const MAX_QUESTIONS = 18;
   const [region, setRegion] = useState("US"); // "US" (Hollywood) | "IN" (Kollywood)
   const [round, setRound] = useState(null); // { movie, objects }
   const [loading, setLoading] = useState(false);
@@ -178,11 +179,33 @@ export default function ObjectMovieGuess() {
   const [feedback, setFeedback] = useState("");
   const [answered, setAnswered] = useState(false);
   const [score, setScore] = useState(0);
-  const [played, setPlayed] = useState(0);
+  const [played, setPlayed] = useState(0); // Number of questions attempted
   const [hintReveal, setHintReveal] = useState(false);
+  const [showScore, setShowScore] = useState(false); // Final result screen
 
-  // Fetch a new round (movie + concrete object/prop clues)
-  const loadRound = async () => {
+  // State reset for region switch or replay
+  function resetState(nextRegion = region) {
+    setScore(0);
+    setPlayed(0);
+    setShowScore(false);
+    setErrMsg("");
+    setFeedback("");
+    setAnswered(false);
+    setInput("");
+    setHintReveal(false);
+    setRound(null);
+    setLoading(false);
+  }
+
+  // Robust round loader respecting session end
+  const loadRound = async (force = false) => {
+    if (showScore && !force) return;
+    if (played >= MAX_QUESTIONS && !force) {
+      setShowScore(true);
+      setRound(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setErrMsg("");
     setFeedback("");
@@ -205,41 +228,65 @@ export default function ObjectMovieGuess() {
     setLoading(false);
   };
 
-  // Load new round on mount and region switch
+  // Load round on mount OR region switch, but fully reset state
   useEffect(() => {
-    loadRound();
+    resetState(region);
+    loadRound(true);
     // eslint-disable-next-line
   }, [region]);
 
-  // Handle user's guess
+  // On showScore->false (replay), fully reset and start again
+  useEffect(() => {
+    if (!showScore && played === 0 && !round && !loading) {
+      loadRound(true);
+    }
+    // eslint-disable-next-line
+  }, [showScore]);
+
+  // SUBMIT: only accept if session not over
   function handleSubmit(e) {
     e.preventDefault();
-    if (!input.trim()) return;
-    setPlayed(p => p + 1);
+    if (!input.trim() || showScore || !round || answered) return;
     setAnswered(true);
+    setPlayed(p => p + 1);
+
     // Accept answer if the guess matches the movie title, ignoring punctuation/case
     const normalize = s =>
       (s || "")
         .toLowerCase()
         .replace(/[\W_]+/g, "")
         .trim();
+
     const correct =
-      round && (
+      round &&
+      (
         normalize(input) === normalize(round.movie.title) ||
         normalize(input) === normalize(round.movie.original_title)
       );
+
     if (correct) {
       setFeedback("🎉 Correct!");
       setScore(s => s + 1);
     } else {
       setFeedback(`❌ Wrong! The answer was: ${round && round.movie.title}`);
     }
-    setTimeout(() => {
-      loadRound();
-    }, correct ? 1600 : 2100);
+
+    // If session ends after this, go to score screen; otherwise load next round.
+    const nextPlayed = played + 1;
+    if (nextPlayed >= MAX_QUESTIONS) {
+      setTimeout(() => {
+        setShowScore(true);
+        setRound(null);
+        setHintReveal(false);
+      }, correct ? 1100 : 1700);
+    } else {
+      setTimeout(() => {
+        loadRound();
+      }, correct ? 1300 : 1900);
+    }
   }
 
-  // UI styles (unchanged)
+  // UI styles (+ score screen)
   const styles = {
     container: {
       maxWidth: 530,
@@ -342,6 +389,16 @@ export default function ObjectMovieGuess() {
       fontStyle: "italic",
       textAlign: "center",
     },
+    scoreScreen: {
+      background: "#edeafa",
+      borderRadius: 15,
+      padding: "32px 11px 28px",
+      boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.07)",
+      textAlign: "center",
+      margin: "39px auto 10px",
+      maxWidth: 370,
+      animation: "fadeInPop 0.55s cubic-bezier(.41,.81,.52,1)",
+    }
   };
 
   const posterBase = "https://image.tmdb.org/t/p/w185";
@@ -356,8 +413,8 @@ export default function ObjectMovieGuess() {
         <button
           className="btn"
           style={styles.btn(region === "US")}
-          onClick={() => { setRegion("US"); setScore(0); setPlayed(0); }}
-          disabled={region === "US"}
+          onClick={() => { setRegion("US"); }} // triggers effect with full reset
+          disabled={region === "US" && !showScore}
           type="button"
         >
           Hollywood
@@ -365,125 +422,177 @@ export default function ObjectMovieGuess() {
         <button
           className="btn"
           style={styles.btn(region === "IN")}
-          onClick={() => { setRegion("IN"); setScore(0); setPlayed(0); }}
-          disabled={region === "IN"}
+          onClick={() => { setRegion("IN"); }}
+          disabled={region === "IN" && !showScore}
           type="button"
         >
           Kollywood
         </button>
       </div>
-      <div style={styles.score}>Score: {score} / {played}</div>
-      {errMsg && <ErrorToast message={errMsg} />}
-      {loading && (
-        <div style={{ margin: "26px 0 22px", textAlign: "center" }}>
-          <Loader size={34} />
-        </div>
-      )}
-      {!loading && round && (
-        <>
-          {/* Clues Grid */}
-          <div style={styles.cluesGrid}>
-            {round.objects.map((obj, idx) => (
-              <div key={idx} style={styles.clueBox}>
-                {obj}
-              </div>
-            ))}
+      <div style={styles.score}>
+        Score: {score} / {played}
+        {` (Max: ${MAX_QUESTIONS})`}
+      </div>
+      {showScore ? (
+        <div
+          style={styles.scoreScreen}
+          className="subtle-pop"
+          aria-label="Quiz End Score"
+        >
+          <div
+            style={{
+              fontSize: "1.47rem",
+              fontWeight: 900,
+              color: "#973caa",
+              letterSpacing: ".012em",
+              marginBottom: 5,
+            }}
+          >
+            🎉 Session Complete!
           </div>
-          <form style={styles.form} onSubmit={handleSubmit} autoComplete="off">
-            <input
-              className="input"
-              placeholder="Enter movie title"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              disabled={answered}
-              autoFocus
-              style={{ width: 198, fontWeight: 590, fontSize: "1.09rem" }}
-              aria-label="Your guess"
-            />
-            <button
-              className="btn"
-              type="submit"
-              disabled={answered}
-              style={{ padding: "10px 19px", fontWeight: 700 }}
-            >
-              {answered ? "✓" : "Submit"}
-            </button>
-            <button
-              type="button"
-              style={styles.revealBtn}
-              onClick={() => setHintReveal(v => !v)}
-              disabled={answered && hintReveal}
-              tabIndex={-1}
-              aria-label="Toggle More Hint"
-            >
-              {hintReveal ? "Hide Poster" : "Show Movie Poster"}
-            </button>
-          </form>
-          {/* Show poster as additional hint */}
-          {hintReveal && (
-            <div style={{ margin: "6px 0 0", textAlign: "center" }}>
-              {round.movie.poster_path ? (
-                <img
-                  src={posterBase + round.movie.poster_path}
-                  alt="Poster hint"
-                  style={styles.posterThumb}
+          <div style={{ fontWeight: 700, color: "#763195", fontSize: "1.15rem", margin: "10px 0" }}>
+            Final Score:{" "}
+            <span style={{ color: "#24974e" }}>{score}</span> / {MAX_QUESTIONS}
+          </div>
+          <div style={{ margin: "8px 0 19px", color: "#8e83a2", fontSize: ".99rem" }}>
+            {score === MAX_QUESTIONS
+              ? "Unbeatable! Object-movie master!"
+              : score >= 13
+              ? "Excellent visual memory – well played!"
+              : score >= 7
+              ? "Good effort! Try again for a top score."
+              : "Keep practicing for higher recognition skills!"}
+          </div>
+          <button
+            className="btn btn-large"
+            style={{ fontWeight: 700, marginBottom: 7, fontSize: "1.11rem" }}
+            onClick={() => {
+              resetState(region);
+              setShowScore(false);
+              loadRound(true);
+            }}
+          >
+            Play Again
+          </button>
+        </div>
+      ) : (
+        <>
+          {errMsg && <ErrorToast message={errMsg} />}
+          {loading && (
+            <div style={{ margin: "26px 0 22px", textAlign: "center" }}>
+              <Loader size={34} />
+            </div>
+          )}
+          {!loading && round && (
+            <>
+              {/* Clues Grid */}
+              <div style={styles.cluesGrid}>
+                {round.objects.map((obj, idx) => (
+                  <div key={idx} style={styles.clueBox}>
+                    {obj}
+                  </div>
+                ))}
+              </div>
+              <form style={styles.form} onSubmit={handleSubmit} autoComplete="off">
+                <input
+                  className="input"
+                  placeholder="Enter movie title"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  disabled={answered}
+                  autoFocus
+                  style={{ width: 198, fontWeight: 590, fontSize: "1.09rem" }}
+                  aria-label="Your guess"
                 />
-              ) : (
-                <div
-                  style={{
-                    ...styles.posterThumb,
-                    color: "#c8b9db",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "1.8rem",
-                  }}
+                <button
+                  className="btn"
+                  type="submit"
+                  disabled={answered}
+                  style={{ padding: "10px 19px", fontWeight: 700 }}
                 >
-                  🎬
+                  {answered ? "✓" : "Submit"}
+                </button>
+                <button
+                  type="button"
+                  style={styles.revealBtn}
+                  onClick={() => setHintReveal(v => !v)}
+                  disabled={answered && hintReveal}
+                  tabIndex={-1}
+                  aria-label="Toggle More Hint"
+                >
+                  {hintReveal ? "Hide Poster" : "Show Movie Poster"}
+                </button>
+              </form>
+              {/* Show poster as additional hint */}
+              {hintReveal && (
+                <div style={{ margin: "6px 0 0", textAlign: "center" }}>
+                  {round.movie.poster_path ? (
+                    <img
+                      src={posterBase + round.movie.poster_path}
+                      alt="Poster hint"
+                      style={styles.posterThumb}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        ...styles.posterThumb,
+                        color: "#c8b9db",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "1.8rem",
+                      }}
+                    >
+                      🎬
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+              {/* Feedback */}
+              {feedback && (
+                <div
+                  style={
+                    typeof feedback === "string"
+                      ? styles.feedback(feedback.startsWith("🎉"))
+                      : styles.feedback(false)
+                  }
+                >
+                  {feedback}
+                </div>
+              )}
+              {/* Movie/Year Reveal after answer */}
+              {answered && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: "#edeafa",
+                    padding: "10px 13px",
+                    borderRadius: 13,
+                    color: "#481d77",
+                    fontWeight: 600,
+                    boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
+                    fontSize: ".98rem",
+                    textAlign: "center",
+                  }}
+                >
+                  <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
+                  {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
+                </div>
+              )}
+              <div style={{ marginTop: 14, color: "#a58cc2", fontSize: ".99rem", textAlign: "center" }}>
+                {`Question ${played + (answered ? 0 : 1)} of ${MAX_QUESTIONS}`}
+              </div>
+            </>
           )}
-          {/* Feedback */}
-          {feedback && (
-            <div
-              style={
-                typeof feedback === "string"
-                  ? styles.feedback(feedback.startsWith("🎉"))
-                  : styles.feedback(false)
-              }
-            >
-              {feedback}
-            </div>
-          )}
-          {/* Movie/Year Reveal after answer */}
-          {answered && (
-            <div
-              style={{
-                marginTop: 10,
-                background: "#edeafa",
-                padding: "10px 13px",
-                borderRadius: 13,
-                color: "#481d77",
-                fontWeight: 600,
-                boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
-                fontSize: ".98rem",
-                textAlign: "center",
-              }}
-            >
-              <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
-              {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
+          {!loading && !round && !errMsg && (
+            <div style={{ margin: "20px 0", color: "#c75e77" }}>
+              Oops, unable to load a round.{" "}
+              <button className="btn" onClick={() => loadRound(true)}>
+                Retry
+              </button>
             </div>
           )}
         </>
-      )}
-      {!loading && !round && !errMsg && (
-        <div style={{ margin: "20px 0", color: "#c75e77" }}>
-          Oops, unable to load a round.{" "}
-          <button className="btn" onClick={loadRound}>
-            Retry
-          </button>
-        </div>
       )}
       {/* Instructions */}
       <div style={styles.hintText}>
