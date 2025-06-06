@@ -6,10 +6,11 @@ import { fetchMoviesByRegion } from "../../tmdbApi";
 import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
-// MovieDialogueQuiz - TMDB-powered multiple-choice quiz.
-// - Fetches a random TMDB movie (Hollywood/Kollywood).
-// - Uses tagline or overview as a "quote".
-// - User must select the correct movie among distractors.
+// MovieDialogueQuiz - TMDB-powered multiple-choice quiz with enhanced clue logic:
+// - Avoid clues that reveal movie/character names or spoil the main plot
+// - Prefers taglines/keywords/filtered overview from TMDB via API
+// - Redacts forbidden terms in clues for challenging gameplay
+
 export default function MovieDialogueQuiz() {
   const [region, setRegion] = useState("US");
   const [round, setRound] = useState(null);
@@ -20,30 +21,72 @@ export default function MovieDialogueQuiz() {
   const [score, setScore] = useState(0);
   const [played, setPlayed] = useState(0);
 
-  // Helper: fetch random movies from TMDB for the quiz round
+  // Helper: redact forbidden terms (movie title/keywords) in clue
+  function redactClue(text, forbidden) {
+    if (!text || !forbidden || !forbidden.length) return text;
+    let clue = text;
+    forbidden.forEach(term => {
+      if (term && term.length > 1) {
+        const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "gi");
+        clue = clue.replace(regex, "_____");
+      }
+    });
+    return clue;
+  }
+
+  // Helper: get keywords and details from TMDB for improved clues
+  async function fetchExtraClues(mid) {
+    try {
+      // Get details (tagline, overview)
+      const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${mid}?api_key=${process.env.REACT_APP_TMDB_API_KEY}`);
+      const details = await detailRes.json();
+      // Get keywords
+      const keywordsRes = await fetch(`https://api.themoviedb.org/3/movie/${mid}/keywords?api_key=${process.env.REACT_APP_TMDB_API_KEY}`);
+      const kwJson = await keywordsRes.json();
+      let keywords = [];
+      if (kwJson && (Array.isArray(kwJson.keywords) || Array.isArray(kwJson.results))) {
+        // TMDB uses .keywords or .results
+        keywords = kwJson.keywords || kwJson.results || [];
+      }
+      return {
+        tagline: details.tagline || "",
+        overview: details.overview || "",
+        keywords: (keywords || []).map(k => k.name).filter(Boolean),
+      };
+    } catch {
+      return { tagline: "", overview: "", keywords: [] };
+    }
+  }
+
+  // Quiz round generator with advanced clue logic
   async function getRandomQuizRound(region = "US", decoyCount = 3) {
     let tries = 0;
     let movie = null;
-    // Try to fetch a random movie with a tagline or overview
-    while (!movie && tries < 7) {
+    let details = null;
+    // Try to fetch a random movie with a tagline, overview, or keywords
+    while (!movie && tries < 8) {
       try {
         const page = 1 + Math.floor(Math.random() * 5);
         const res = await fetchMoviesByRegion(region, { page });
         if (!res || !res.results) break;
-        // Find a suitable movie with tagline or overview
+        // Find a suitable movie
         const candidates = res.results.filter(
           (m) =>
             m &&
-            m.title &&
-            ((typeof m.tagline === "string" && m.tagline.length > 12) ||
-              (typeof m.overview === "string" && m.overview.length > 18)) &&
-            m.title.length > 4
+            m.title && m.id &&
+            (
+              (typeof m.tagline === "string" && m.tagline.length > 10) ||
+              (typeof m.overview === "string" && m.overview.length > 20) ||
+              (typeof m.id === "number")
+            ) &&
+            m.title.length > 3
         );
         if (candidates.length === 0) {
           tries++;
           continue;
         }
         movie = candidates[Math.floor(Math.random() * candidates.length)];
+        details = await fetchExtraClues(movie.id);
       } catch {
         break;
       }
@@ -51,11 +94,39 @@ export default function MovieDialogueQuiz() {
     }
     if (!movie) return null;
 
-    // Select the quiz 'quote'
-    let text =
-      movie.tagline && movie.tagline.length > 12
-        ? movie.tagline
-        : movie.overview;
+    // Clue filtering: block movie name and keywords
+    let forbidden = [movie.title, movie.original_title, ...(details && details.keywords ? details.keywords : [])];
+
+    // Clue selection preference: tagline > non-forbidden keyword > overview > fallback
+    let candidates = [];
+    if (details && details.tagline && details.tagline.length > 10) {
+      candidates.push(details.tagline);
+    }
+    if (details && details.keywords && details.keywords.length > 0) {
+      details.keywords.forEach(k => {
+        if (!forbidden.some(ft => ft && k && ft.toLowerCase() === k.toLowerCase()))
+          candidates.push(k);
+      });
+    }
+    if (details && details.overview && details.overview.length > 20) {
+      candidates.push(details.overview);
+    }
+    if (movie.tagline && movie.tagline.length > 10) candidates.push(movie.tagline);
+    if (movie.overview && movie.overview.length > 20) candidates.push(movie.overview);
+
+    // Exclude clues with forbidden terms (case insensitive)
+    function clueAcceptable(clue) {
+      if (!clue) return false;
+      const lowered = clue.toLowerCase();
+      return !forbidden.some(t => !!t && t.length > 1 && lowered.includes(t.toLowerCase()));
+    }
+    let clue = candidates.find(clueAcceptable);
+
+    // If no clue passes, redact the forbidden terms in the first candidate
+    if (!clue && candidates.length) {
+      clue = redactClue(candidates[0], forbidden);
+    }
+    if (!clue) clue = "Guess the movie based on this mysterious clue!";
 
     // Fetch decoy (incorrect) movies
     let decoys = [];
@@ -81,10 +152,10 @@ export default function MovieDialogueQuiz() {
       }
       decoyAttempts++;
     }
-    // Compose and shuffle choices
+    // Shuffle answers
     const allChoices = shuffleArray([movie, ...decoys.slice(0, decoyCount)]);
     return {
-      text,
+      text: clue,
       answer: movie,
       choices: allChoices,
     };
@@ -123,13 +194,13 @@ export default function MovieDialogueQuiz() {
     }
   }
 
-  // Load new round when region changes or on mount
+  // Load new round on region switch/mount
   useEffect(() => {
     loadRound();
     // eslint-disable-next-line
   }, [region]);
 
-  // Handle user selection
+  // User choice handler
   function handleChoose(movie) {
     if (selected) return;
     setSelected(movie);
