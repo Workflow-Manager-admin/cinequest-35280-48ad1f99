@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import { getMemoryTrainerRound } from "../../tmdbGameUtils";
+import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
 // MemoryTrainer - lively game mode where the user views a movie still for 5 seconds and then answers a recall question about it (year, actor, or genre).
@@ -205,6 +206,7 @@ export default function MemoryTrainer() {
 
   return (
     <div className="game-container" style={styles.container}>
+      <BackButton />
       <h2 className="title" style={styles.header}>
         Movie Memory Trainer
       </h2>

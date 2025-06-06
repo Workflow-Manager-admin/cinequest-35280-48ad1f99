@@ -3,6 +3,7 @@ import { getMoviesWithBothActors } from "../../tmdbGameUtils";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import GameCard from "../../components/GameCard";
+import BackButton from "../../components/BackButton";
 
 /**
  * PUBLIC_INTERFACE
@@ -390,6 +391,7 @@ export default function ActorComboFinder() {
         animation: "fadeInPop 0.5s",
       }}
     >
+      <BackButton />
       <h2
         className="title"
         style={{

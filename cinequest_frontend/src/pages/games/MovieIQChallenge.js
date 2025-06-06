@@ -3,6 +3,7 @@ import GameCard from "../../components/GameCard";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import { getIQChallengeRound, getRandomMovies, sampleN } from "../../tmdbGameUtils";
+import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
 // MovieIQChallenge - Timed movie quiz: guess the movie from year+director, multiple choice
@@ -168,6 +169,7 @@ export default function MovieIQChallenge() {
 
   return (
     <div className="game-container" style={styles.container}>
+      <BackButton />
       <h2 className="title" style={{ color: "#973caa", margin: "0 0 9px" }}>
         Movie IQ Challenge
       </h2>

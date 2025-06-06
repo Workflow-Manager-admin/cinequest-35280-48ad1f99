@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import GameCard from "../../components/GameCard";
+import BackButton from "../../components/BackButton";
 
 // TMDB API KEY from env
 const TMDB_API_KEY = process.env.REACT_APP_TMDB_API_KEY;
@@ -158,6 +159,7 @@ export default function FilmDetective() {
 
   return (
     <div className="game-container" style={containerStyle}>
+      <BackButton />
       <h2 className="title" style={{
         color: "#973caa",
         margin: "0 0 13px",

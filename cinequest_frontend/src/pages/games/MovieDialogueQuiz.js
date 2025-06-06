@@ -3,6 +3,7 @@ import GameCard from "../../components/GameCard";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import { fetchMoviesByRegion } from "../../tmdbApi";
+import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
 // MovieDialogueQuiz - TMDB-powered multiple-choice quiz.
@@ -208,6 +209,7 @@ export default function MovieDialogueQuiz() {
 
   return (
     <div className="game-container" style={styles.container}>
+      <BackButton />
       <h2 className="title" style={{ color: "#973caa", margin: "0 0 12px" }}>
         Movie Dialogue Quiz
       </h2>

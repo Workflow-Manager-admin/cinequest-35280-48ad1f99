@@ -3,6 +3,7 @@ import { getObjectGuessRound } from "../../tmdbGameUtils";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import GameCard from "../../components/GameCard";
+import BackButton from "../../components/BackButton";
 
 /**
  * PUBLIC_INTERFACE
@@ -191,6 +192,7 @@ export default function ObjectMovieGuess() {
 
   return (
     <div className="game-container" style={styles.container}>
+      <BackButton />
       <h2 className="title" style={{ color: "#973caa", margin: "0 0 14px" }}>
         Object-Based Movie Guess
       </h2>
