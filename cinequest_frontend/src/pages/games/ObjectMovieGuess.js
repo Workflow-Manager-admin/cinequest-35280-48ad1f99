@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import BackButton from "../../components/BackButton";
+import { getKollywoodAnswerRoman } from "../../tamilTransliterator";
 
 // Replacement for getObjectGuessRound with strict object/prop/place-only clue logic.
 // Uses TMDB API directly for advanced clue filtering.
@@ -32,11 +33,11 @@ async function getStrictObjectCluesRound(region = "US") {
         m =>
           !!m.poster_path &&
           m.title &&
-          (!(
+          !(
             region === "IN" &&
             (m.original_language !== "ta" ||
               (m.title && m.title.trim().toLowerCase() === "anagarigam"))
-          ))
+          )
       );
       if (filtered.length) {
         return filtered[Math.floor(Math.random() * filtered.length)];
@@ -81,7 +82,7 @@ async function getStrictObjectCluesRound(region = "US") {
       for (const person of credits.cast.slice(0, 8)) {
         if (
           person.character &&
-          (/\b(suit|blade|hammer|wheelchair|mask|robot|cobra|cape|ring|gun|car|bike|cycle|sari|uniform|pot|tattoo|jacket|book|diary|statue|painting|sword|shield|cap|turban|crown|hat|shoe|doll|horse|train|computer|phone|tree|dog|snake|glass|camera|drum|guitar|saxophone|pistol|pen|notebook|amulet|necklace|bottle|fan|sign|bag|vase|lamp|stick|plaque|hat|torch)\b/i.test(person.character))
+          /\b(suit|blade|hammer|wheelchair|mask|robot|cobra|cape|ring|gun|car|bike|cycle|sari|uniform|pot|tattoo|jacket|book|diary|statue|painting|sword|shield|cap|turban|crown|hat|shoe|doll|horse|train|computer|phone|tree|dog|snake|glass|camera|drum|guitar|saxophone|pistol|pen|notebook|amulet|necklace|bottle|fan|sign|bag|vase|lamp|stick|plaque|hat|torch)\b/i.test(person.character)
         ) {
           const phrase = person.character;
           if (!clues.some(c => c.toLowerCase() === phrase.toLowerCase())) {
@@ -283,7 +284,13 @@ export default function ObjectMovieGuess() {
       setFeedback("🎉 Correct!");
       setScore(s => s + 1);
     } else {
-      setFeedback(`❌ Wrong! The answer was: ${round && round.movie.title}`);
+      setFeedback(
+        `❌ Wrong! The answer was: ${
+          round && region === "IN"
+            ? getKollywoodAnswerRoman(round.movie)
+            : round && round.movie.title
+        }`
+      );
     }
 
     // If session ends after this, go to score screen; otherwise load next round.
@@ -575,10 +582,6 @@ export default function ObjectMovieGuess() {
                   {feedback}
                 </div>
               )}
-              {/* Movie/Year Reveal after answer */}
-              {answered && (
-                <></>
-              )}
               {/* Only show answer after explicit reveal button */}
               {!answered && hintReveal && round && (
                 <div
@@ -594,7 +597,11 @@ export default function ObjectMovieGuess() {
                     textAlign: "center",
                   }}
                 >
-                  <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
+                  <span style={{ color: "#973caa" }}>
+                    {region === "IN"
+                      ? getKollywoodAnswerRoman(round.movie)
+                      : round.movie.title}
+                  </span>{" "}
                   {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
                 </div>
               )}

@@ -420,7 +420,12 @@ export default function MovieIQChallenge() {
                     <GameCard
                       key={movie.id}
                       movie
-                      title={movie.title}
+                      // Kollywood: show Romanized title in choices
+                      title={
+                        region === "IN"
+                          ? require("../../tamilTransliterator").getKollywoodAnswerRoman(movie)
+                          : movie.title
+                      }
                       poster={posterUrl(movie.poster_path)}
                       year=""
                       description={movie.overview}
@@ -472,7 +477,11 @@ export default function MovieIQChallenge() {
                     marginTop: 7,
                   }}
                 >
-                  <span style={{ color: "#973caa" }}>{round.answer.title}</span>
+                  <span style={{ color: "#973caa" }}>
+                    {region === "IN"
+                      ? require("../../tamilTransliterator").getKollywoodAnswerRoman(round.answer)
+                      : round.answer.title}
+                  </span>
                   {round.answer.release_date ? ` (${round.answer.release_date.slice(0, 4)})` : ""}
                 </div>
               )}

@@ -558,7 +558,11 @@ export default function MemoryTrainer() {
                   {/* Reveal Answer section -- only shows after reveal/skipped or correct answer */}
                   {revealed && (
                     <div style={styles.titleBox}>
-                      <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
+                      <span style={{ color: "#973caa" }}>
+                        {region === "IN"
+                          ? require("../../tamilTransliterator").getKollywoodAnswerRoman(round.movie)
+                          : round.movie.title}
+                      </span>{" "}
                       {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
                     </div>
                   )}

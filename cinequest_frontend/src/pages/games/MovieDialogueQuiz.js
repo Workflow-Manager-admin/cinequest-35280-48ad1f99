@@ -427,7 +427,12 @@ export default function MovieDialogueQuiz() {
                     <GameCard
                       key={movie.id}
                       movie
-                      title={movie.title}
+                      // Kollywood: show Romanized title for choices
+                      title={
+                        region === "IN"
+                          ? require("../../tamilTransliterator").getKollywoodAnswerRoman(movie)
+                          : movie.title
+                      }
                       description={movie.release_date ? movie.release_date.slice(0,4) : ""}
                       poster={posterUrl(movie.poster_path)}
                       year=""
