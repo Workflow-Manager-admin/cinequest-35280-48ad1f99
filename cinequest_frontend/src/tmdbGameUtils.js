@@ -1,118 +1,70 @@
-import { fetchMoviesByRegion } from "./tmdbApi";
-
-// PUBLIC_INTERFACE
-// Utility functions for TMDB-powered CineQuest games. 
-// All Kollywood (region "IN") fetches use strict Tamil-language filtering.
-
-// Sample dev/test fetch (visible in dev console for sanity checking)
-if (process.env.NODE_ENV === "development") {
-  (async () => {
-    try {
-      const sampleKollywood = await fetchMoviesByRegion("IN", { page: 1 });
-      if (sampleKollywood && Array.isArray(sampleKollywood.results)) {
-        // Log basic details for verification
-        console.log(
-          "[Kollywood Sample]",
-          sampleKollywood.results
-            .slice(0, 3)
-            .map((m) => `${m.title} (${m.original_language})`)
-            .join("; ")
-        );
-      }
-    } catch (e) {
-      console.error("Kollywood Sample fetch failed", e);
-    }
-  })();
-}
+//
+// Utility functions for CineQuest games - original version, with basic helpers only
+//
 
 /**
  * PUBLIC_INTERFACE
- * Fetches all movies in which both given actors appear, filtered for Hollywood (US) or Kollywood (IN: Tamil-only).
- * @param {string|number} actor1Id
- * @param {string|number} actor2Id
- * @param {'US'|'IN'} region
- * @returns {Promise<object[]>} Array of movie objects where both actors starred
+ * Generate a round for movie recall/memory game (random movie and simple Q/A)
  */
-export async function getMoviesWithBothActors(actor1Id, actor2Id, region = "US") {
-  // Placeholder stub; real implementation can use fetch/credits as needed
-  return [];
-}
-
-/**
- * PUBLIC_INTERFACE
- * Generates a memory trainer round.
- * @param {'US'|'IN'} region
- * @returns {Promise<object>} Object with { movie, imageUrl, recallType, answer }
- */
-export async function getMemoryTrainerRound(region = "US") {
-  // Minimal stub. The actual implementation would call TMDB appropriately.
+export async function getMemoryTrainerRound(region) {
+  // Use Hollywood or Kollywood, basic fetch and pick logic
+  const { fetchMoviesByRegion } = await import("./tmdbApi");
+  const res = await fetchMoviesByRegion(region, { page: 1 + Math.floor(Math.random() * 3) });
+  if (!res || !res.results || !res.results.length) throw new Error("No movies found");
+  const movie = res.results[Math.floor(Math.random() * res.results.length)];
   return {
-    movie: {
-      id: 0,
-      title: "Sample Movie",
-      original_language: region === "IN" ? "ta" : "en",
-      credits: { cast: [] }
-    },
-    imageUrl: "",
-    recallType: "year",
-    answer: "2000"
+    movie,
+    imageUrl: movie.poster_path ? "https://image.tmdb.org/t/p/w342" + movie.poster_path : "",
+    answer: movie.title,
+    recallType: "title",
   };
 }
 
 /**
  * PUBLIC_INTERFACE
- * Generates an IQ Challenge round.
- * @param {'US'|'IN'} region
- * @returns {Promise<object>} Object with { movie, director }
+ * Generate IQ challenge round (returns movie + director + year, no keyword logic)
  */
-export async function getIQChallengeRound(region = "US") {
-  // Minimal stub only. The actual version should use TMDB API.
-  return {
-    movie: {
-      id: 1,
-      title: region === "IN" ? "தாமிரபரணி" : "Inception",
-      original_language: region === "IN" ? "ta" : "en"
-    },
-    director: region === "IN" ? "ஹரி" : "Christopher Nolan"
-  };
+export async function getIQChallengeRound(region) {
+  const { fetchMoviesByRegion, fetchMovieCredits } = await import("./tmdbApi");
+  const res = await fetchMoviesByRegion(region);
+  if (!res || !res.results || !res.results.length) throw new Error("No movies found");
+  const movie = res.results[Math.floor(Math.random() * res.results.length)];
+  // Simple director finding
+  let director = "";
+  try {
+    const credits = await fetchMovieCredits(movie.id);
+    const dir = credits.crew && credits.crew.find(c => c.job === "Director");
+    director = dir ? dir.name : "";
+  } catch (e) {}
+  return { movie, director, answer: movie.title, year: (movie.release_date || "").slice(0, 4) };
 }
 
 /**
  * PUBLIC_INTERFACE
- * Fetches an array of random movies (region-aware). Used for quiz decoys or multiple choice options.
- * @param {'US'|'IN'} region
- * @param {number} n - number of movies to fetch
- * @param {object} options - could include {page, genre, etc}
- * @returns {Promise<object[]>}
+ * Simple getRandomMovies for ObjectMovieGuess/MovieIQ=Challenge (returns N movies)
  */
-export async function getRandomMovies(region = "US", n = 3, options = {}) {
-  // Minimal stub: returns n dummy movies with proper language for region
-  return Array.from({ length: n }).map((_, i) => ({
-    id: 100 + i,
-    title: region === "IN" ? `காதல் படம் ${i + 1}` : `Hollywood Movie ${i + 1}`,
-    original_language: region === "IN" ? "ta" : "en",
-    overview: "",
-    poster_path: null,
-  }));
+export async function getRandomMovies(region, n, options) {
+  const { fetchMoviesByRegion } = await import("./tmdbApi");
+  const res = await fetchMoviesByRegion(region, { ...options });
+  if (!res || !res.results) return [];
+  let arr = [...res.results];
+  // Shuffle and sample n
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, n);
 }
 
 /**
  * PUBLIC_INTERFACE
- * Returns a random sample of n elements from arr (shuffle if needed).
- * @param {Array} arr
- * @param {number} n
- * @returns {Array}
+ * Fisher-Yates sample N from array (defensively shallow copied)
  */
 export function sampleN(arr, n) {
-  if (!Array.isArray(arr)) return [];
-  const a = [...arr];
+  const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a.slice(0, n);
 }
-
-// You can add or re-export further helper utilities here as needed for the games, 
-// e.g. actor/movie fetching logic, quiz round generators, etc.
-// No further content shown (refer to each game file for their own utility logic).

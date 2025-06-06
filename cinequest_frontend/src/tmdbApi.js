@@ -1,133 +1,64 @@
-//
-// Utility module to interact with TheMovieDB API for CineQuest
-//
-// - Provides functions to fetch Hollywood and Kollywood movie data
-// - Handles API key via environment variables for security
-// - Designed to be imported by game and quiz features
-//
+// Very simple TMDB utilities for the original CineQuest delivery
 
 const API_BASE_URL = "https://api.themoviedb.org/3";
 const API_KEY = process.env.REACT_APP_TMDB_API_KEY;
 
-/**
- * Helper to construct full TMDB API url with api_key param.
- * @param {string} endpoint - API endpoint (e.g., '/search/movie')
- * @param {object} params - Extra params as a flat object
- * @returns {string}
- */
-function buildUrl(endpoint, params = {}) {
-  const url = new URL(API_BASE_URL + endpoint);
-
-  url.searchParams.append("api_key", API_KEY);
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) url.searchParams.append(k, v);
-  });
-  return url.toString();
-}
-
-/**
- * PUBLIC_INTERFACE
- * Fetches movies filtered by a given ISO 3166-1 country code (for Hollywood: "US", Kollywood: "IN").
- * Can be used to get lists for quiz/game features.
- * 
- * @param {'US'|'IN'} region - "US" for Hollywood, "IN" for Kollywood.
- * @param {object} options - { query, page, with_genres, year, language }
- *        e.g. { query: 'Inception', page: 1 }
- * @returns {Promise<object>} Movie search results
- */
+// PUBLIC_INTERFACE
 export async function fetchMoviesByRegion(region, options = {}) {
-  // Enhanced: For Kollywood, ensure only Tamil-language movies (original_language: "ta", language: "ta-IN").
-  // Use robust post-filtering to exclude false positives from TMDB.
-  const isKollywood = region === "IN";
+  // Only Hollywood (US) or Kollywood (IN), simple logic
   const params = {
     page: options.page || 1,
     region,
     ...(options.query ? { query: options.query } : {}),
-    ...(options.year ? { year: options.year } : {}),
-    ...(isKollywood
+    ...(region === "IN"
       ? { language: "ta-IN", with_original_language: "ta" }
-      : { language: options.language || "en-US", with_original_language: "en" })
+      : { language: options.language || "en-US", with_original_language: "en" }),
   };
-
-  // TMDB discover DOES return some non-Tamil films for IN even with strict param, so filter in JS.
   const endpoint = options.query ? "/search/movie" : "/discover/movie";
-  const url = buildUrl(endpoint, params);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`TMDB API error (${response.status}): ${response.statusText}`);
-  }
-  const data = await response.json();
-
-  if (isKollywood && data && Array.isArray(data.results)) {
-    // Filter: only Tamil-language movies, and exclude "Anagarigam" (which can be an outlier)
-    data.results = data.results.filter(movie =>
-      movie &&
-      (
-        movie.original_language === "ta" ||
-        (movie.original_language === "ta" ||
-          (movie.spoken_languages && movie.spoken_languages.some(l => l.iso_639_1 === "ta")))
-      ) &&
-      (!movie.title || movie.title.trim().toLowerCase() !== "anagarigam")
-    );
+  const url = new URL(API_BASE_URL + endpoint);
+  url.searchParams.append("api_key", API_KEY);
+  Object.entries(params).forEach(([k, v]) => v && url.searchParams.append(k, v));
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("TMDB API error");
+  const data = await resp.json();
+  if (region === "IN" && data.results) {
+    // Only Tamil movies for Kollywood (original C.Q. version)
+    data.results = data.results.filter(
+      m => m && (m.original_language === "ta" || (m.spoken_languages && m.spoken_languages.some(l => l.iso_639_1 === "ta"))));
   }
   return data;
 }
 
-/**
- * PUBLIC_INTERFACE
- * Fetches details for a specific movie by TMDB movie ID.
- * 
- * @param {number} movieId
- * @param {object} options - { language: string }
- * @returns {Promise<object>} Movie details
- */
+// PUBLIC_INTERFACE
 export async function fetchMovieDetails(movieId, options = {}) {
-  const params = {
-    ...(options.language ? { language: options.language } : {})
-  };
-
-  const url = buildUrl(`/movie/${movieId}`, params);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`TMDB API error (${response.status}): ${response.statusText}`);
-  }
-  return await response.json();
+  const url = new URL(`${API_BASE_URL}/movie/${movieId}`);
+  url.searchParams.append("api_key", API_KEY);
+  if (options.language) url.searchParams.append("language", options.language);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("TMDB API error");
+  return await resp.json();
 }
 
-/**
- * PUBLIC_INTERFACE
- * Fetches cast and crew for a given movie.
- * 
- * @param {number} movieId
- * @returns {Promise<object>} credit info { cast, crew }
- */
+// PUBLIC_INTERFACE
 export async function fetchMovieCredits(movieId) {
-  const url = buildUrl(`/movie/${movieId}/credits`);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`TMDB API error (${response.status}): ${response.statusText}`);
-  }
-  return await response.json();
+  const url = new URL(`${API_BASE_URL}/movie/${movieId}/credits`);
+  url.searchParams.append("api_key", API_KEY);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("TMDB API error");
+  return await resp.json();
 }
 
-/**
- * PUBLIC_INTERFACE
- * Fetches popular actors (optionally filtering for region/language).
- * 
- * @param {'US'|'IN'} region
- * @param {object} options
- * @returns {Promise<object>} actors result
- */
+// PUBLIC_INTERFACE
 export async function fetchPopularActors(region, options = {}) {
-  // No Kollywood filter; use original_language as hint
+  // No Kollywood filter; use original_language as hint (original version)
   const params = {
     page: options.page || 1,
-    ...(region === "IN" ? { with_original_language: "ta" } : {})
+    ...(region === "IN" ? { with_original_language: "ta" } : {}),
   };
-  const url = buildUrl("/person/popular", params);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`TMDB API error (${response.status}): ${response.statusText}`);
-  }
-  return await response.json();
+  const url = new URL(`${API_BASE_URL}/person/popular`);
+  url.searchParams.append("api_key", API_KEY);
+  Object.entries(params).forEach(([k, v]) => v && url.searchParams.append(k, v));
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("TMDB API error");
+  return await resp.json();
 }
