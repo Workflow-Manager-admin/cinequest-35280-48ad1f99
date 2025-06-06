@@ -73,11 +73,8 @@ export default function ObjectMovieGuess() {
       setFeedback("🎉 Correct!");
       setScore(s => s + 1);
     } else {
-      setFeedback(
-        <span>
-          ❌ Wrong! The answer was: <span style={{ color: "#973caa" }}>{round.movie.title}</span>
-        </span>
-      );
+      // The feedback here might not always be a string; to avoid .startsWith error, ensure string fallback
+      setFeedback(`❌ Wrong! The answer was: ${round.movie.title}`);
     }
     // After feedback, auto-advance to next round
     setTimeout(() => {
@@ -291,7 +288,13 @@ export default function ObjectMovieGuess() {
           )}
           {/* Feedback */}
           {feedback && (
-            <div style={styles.feedback(feedback.startsWith("🎉"))}>
+            <div
+              style={
+                typeof feedback === "string"
+                  ? styles.feedback(feedback.startsWith("🎉"))
+                  : styles.feedback(false)
+              }
+            >
               {feedback}
             </div>
           )}
