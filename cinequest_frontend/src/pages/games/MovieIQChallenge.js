@@ -1,25 +1,81 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import GameCard from "../../components/GameCard";
 import Loader from "../../components/Loader";
 import ErrorToast from "../../components/ErrorToast";
 import { getIQChallengeRound, getRandomMovies, sampleN } from "../../tmdbGameUtils";
 import BackButton from "../../components/BackButton";
 
+// Fetch extra genre/keyword for more clue variety
+async function fetchExtraMovieInfo(movieId) {
+  try {
+    const detailsRes = await fetch(
+      `https://api.themoviedb.org/3/movie/${movieId}?api_key=${process.env.REACT_APP_TMDB_API_KEY}&append_to_response=keywords`
+    );
+    if (!detailsRes.ok) return {};
+    const details = await detailsRes.json();
+    let genres = details.genres ? details.genres.map((g) => g.name) : [];
+    let keywords = [];
+    if (details.keywords && Array.isArray(details.keywords.keywords)) {
+      keywords = details.keywords.keywords.map(k => k.name);
+    } else if (details.keywords && Array.isArray(details.keywords.results)) {
+      keywords = details.keywords.results.map(k => k.name);
+    }
+    return { genres, keywords };
+  } catch (e) {
+    return { genres: [], keywords: [] };
+  }
+}
+
+// Decide on a non-year clue
+async function getNonYearClue(data) {
+  const { director, movie } = data;
+  let clues = [];
+  if (director) clues.push({ type: "director", value: director });
+  const more = await fetchExtraMovieInfo(movie.id);
+  if (Array.isArray(more.genres) && more.genres.length > 0) {
+    for (let g of more.genres) {
+      clues.push({ type: "genre", value: g });
+    }
+  }
+  if (Array.isArray(more.keywords) && more.keywords.length > 0) {
+    for (let k of more.keywords) {
+      clues.push({ type: "keyword", value: k });
+    }
+  }
+  // Remove duplicates, blanks, prefer non-director clues if possible
+  const uniqClues = [];
+  for (let c of clues) {
+    if (c && typeof c.value === "string" && c.value.trim() && !uniqClues.find(uc => uc.type === c.type && uc.value === c.value)) {
+      uniqClues.push(c);
+    }
+  }
+  const possible = uniqClues.filter(c => c.type !== "director");
+  if (possible.length) {
+    const idx = Math.floor(Math.random() * possible.length);
+    return possible[idx];
+  }
+  return uniqClues.length ? uniqClues[0] : { type: "director", value: "" };
+}
+
 // PUBLIC_INTERFACE
-// MovieIQChallenge - Timed movie quiz: guess the movie from year+director, multiple choice
+// MovieIQChallenge - Timed movie quiz: guess the movie from director/genre/keyword, multiple choice (NO YEAR)
 export default function MovieIQChallenge() {
-  const [region, setRegion] = useState("US"); // "US" (Hollywood) | "IN" (Kollywood)
-  const [round, setRound] = useState(null); // { movie, director, year }
-  const [choices, setChoices] = useState([]); // Array of movies as answer options
+  const [region, setRegion] = useState("US");
+  const [round, setRound] = useState(null);
+  const [choices, setChoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errMsg, setErrMsg] = useState("");
   const [selected, setSelected] = useState(null);
   const [feedback, setFeedback] = useState("");
   const [score, setScore] = useState(0);
   const [played, setPlayed] = useState(0);
+  const [usedMovieIds, setUsedMovieIds] = useState([]);
+  const tryingRef = useRef(false);
 
-  // Helper: fetch a new round (movie + director + year + decoy titles)
+  // Loads a new round and avoids movies seen in session
   async function loadRound() {
+    if (tryingRef.current) return;
+    tryingRef.current = true;
     setLoading(true);
     setErrMsg("");
     setRound(null);
@@ -27,26 +83,36 @@ export default function MovieIQChallenge() {
     setSelected(null);
     setFeedback("");
     try {
-      // get { movie, director, year }
-      const data = await getIQChallengeRound(region);
-      if (!data || !data.movie || !data.year || !data.director || !data.movie.title) {
+      let data = null;
+      let attempts = 0;
+      // Try for a new/unused movie (max 10 attempts)
+      do {
+        data = await getIQChallengeRound(region);
+        attempts++;
+        if (!data || !data.movie || !data.movie.id) break;
+      } while (usedMovieIds.includes(data.movie.id) && attempts < 10);
+
+      if (!data || !data.movie || !data.director || !data.movie.title) {
         setErrMsg("Could not get a valid movie round. Try again?");
         setLoading(false);
+        tryingRef.current = false;
         return;
       }
-      // get decoy options
+
+      // Select a non-year clue
+      const clueObj = await getNonYearClue(data);
+      // Find decoy choices, also skipping already-used and correct movie
       const realMovie = data.movie;
       let decoys = [];
       let tries = 0;
-      // Pick other movies (wrong answers)
       while (decoys.length < 3 && tries < 10) {
-        // grab random movies from TMDB
         const extras = await getRandomMovies(region, 3, {});
         for (const m of extras) {
           if (
             m.id &&
             m.title &&
             m.id !== realMovie.id &&
+            !usedMovieIds.includes(m.id) &&
             !decoys.some((d) => d.id === m.id) &&
             m.title.length > 4
           ) {
@@ -57,7 +123,6 @@ export default function MovieIQChallenge() {
         tries++;
       }
       let allChoices = sampleN([realMovie, ...decoys], 4);
-      // If fallback, shuffle array
       if (allChoices.length < 4) {
         allChoices = [...[realMovie, ...decoys]];
         for (let i = allChoices.length - 1; i > 0; i--) {
@@ -66,25 +131,27 @@ export default function MovieIQChallenge() {
         }
       }
       setRound({
-        director: data.director,
-        year: data.year,
+        clue: clueObj,
         answer: realMovie,
       });
       setChoices(allChoices.slice(0, 4));
+      setUsedMovieIds(prev => [...prev, realMovie.id]);
       setLoading(false);
     } catch (e) {
       setErrMsg("Failed to load a quiz round. Please try again.");
       setLoading(false);
     }
+    tryingRef.current = false;
   }
 
-  // On mount or region change, start a new round
+  // New session or region: reset used
   useEffect(() => {
+    setUsedMovieIds([]);
     loadRound();
     // eslint-disable-next-line
   }, [region]);
 
-  // After answer, auto-load next
+  // Advance to next after answer
   useEffect(() => {
     if (!selected || !round) return;
     const timeout = setTimeout(() => {
@@ -151,7 +218,6 @@ export default function MovieIQChallenge() {
     }
   };
 
-  // Choice button click logic
   function handleChoice(movie) {
     if (selected || loading) return;
     setSelected(movie);
@@ -164,7 +230,41 @@ export default function MovieIQChallenge() {
     }
   }
 
-  // adapt image url for GameCard
+  function renderClueBox(clue) {
+    if (!clue) return null;
+    if (clue.type === "director") {
+      return (
+        <>
+          <span style={{ color: "#763195", fontWeight: 800 }}>Director</span>:{" "}
+          <span style={{ color: "#973caa", fontWeight: 750 }}>{clue.value || "?"}</span>
+        </>
+      );
+    }
+    if (clue.type === "genre") {
+      return (
+        <>
+          <span style={{ color: "#763195", fontWeight: 800 }}>Genre</span>:{" "}
+          <span style={{ color: "#973caa", fontWeight: 750 }}>{clue.value}</span>
+        </>
+      );
+    }
+    if (clue.type === "keyword") {
+      return (
+        <>
+          <span style={{ color: "#763195", fontWeight: 800 }}>Keyword</span>:{" "}
+          <span style={{ color: "#973caa", fontWeight: 750 }}>{clue.value}</span>
+        </>
+      );
+    }
+    // Fallback
+    return (
+      <>
+        <span style={{ color: "#763195", fontWeight: 800 }}>Clue</span>:{" "}
+        <span style={{ color: "#973caa", fontWeight: 750 }}>{clue.value || "?"}</span>
+      </>
+    );
+  }
+
   const posterUrl = poster => poster ? `https://image.tmdb.org/t/p/w185${poster}` : null;
 
   return (
@@ -202,11 +302,7 @@ export default function MovieIQChallenge() {
       ) : round && choices.length ? (
         <>
           <div style={styles.clueBox}>
-            <span style={{ color: "#763195", fontWeight: 800 }}>Director</span>:{" "}
-            <span style={{ color: "#973caa", fontWeight: 750 }}>{round.director || "?"}</span>
-            <span style={{ margin: "0 12px" }}>|</span>
-            <span style={{ color: "#763195", fontWeight: 800 }}>Year</span>:{" "}
-            <span style={{ color: "#973caa", fontWeight: 750 }}>{round.year || "?"}</span>
+            {renderClueBox(round.clue)}
           </div>
           <div style={styles.row}>
             {choices.map((movie) => {
@@ -218,7 +314,7 @@ export default function MovieIQChallenge() {
                   movie
                   title={movie.title}
                   poster={posterUrl(movie.poster_path)}
-                  year={movie.release_date ? String(movie.release_date).slice(0, 4) : ""}
+                  year="" // Remove year clue entirely
                   description={movie.overview}
                   onClick={() => handleChoice(movie)}
                   style={{
@@ -256,7 +352,7 @@ export default function MovieIQChallenge() {
         </>
       ) : !errMsg && (
         <div style={{ margin: "30px 0", textAlign: "center", color: "#8e83a2" }}>
-          Let's see if you recognize the movie from just the year and director!
+          Let's see if you recognize the movie from just the clue!
         </div>
       )}
       {!loading && !errMsg && (!round || choices.length < 2) && (
@@ -275,7 +371,7 @@ export default function MovieIQChallenge() {
         fontSize: ".98rem",
         letterSpacing: ".008em"
       }}>
-        Guess the movie title from the year and director. Sharpen your movie IQ!
+        Guess the movie title from the clue. Sharpen your movie IQ!
       </div>
     </div>
   );
