@@ -205,8 +205,13 @@ export default function MovieDialogueQuiz() {
   // User choice handler
   function handleChoose(movie) {
     if (selected || showScore) return;
+
     setSelected(movie);
-    setPlayed((p) => p + 1);
+
+    // Only increment played (i.e. question number) if we have not reached the max
+    if (played < MAX_QUESTIONS) {
+      setPlayed((p) => p + 1);
+    }
 
     // Determine if this is the final question
     const nextPlayed = played + 1;
@@ -219,11 +224,11 @@ export default function MovieDialogueQuiz() {
         setTimeout(() => {
           setShowScore(true);
           setRound(null);
-        }, 1000);
+        }, 650);
       } else {
         setTimeout(() => {
           loadRound();
-        }, 1100);
+        }, 850);
       }
     } else {
       setFeedback("wrong");
@@ -231,11 +236,11 @@ export default function MovieDialogueQuiz() {
         setTimeout(() => {
           setShowScore(true);
           setRound(null);
-        }, 1200);
+        }, 900);
       } else {
         setTimeout(() => {
           loadRound();
-        }, 1400);
+        }, 1200);
       }
     }
   }
@@ -392,6 +397,8 @@ export default function MovieDialogueQuiz() {
               setShowScore(false);
               setSelected(null);
               setFeedback(null);
+              setErrMsg("");
+              setRound(null);
               loadRound();
             }}
           >
@@ -458,7 +465,7 @@ export default function MovieDialogueQuiz() {
               <div style={{ marginTop: 14, color: "#a58cc2", fontSize: ".99rem", textAlign: "center" }}>
                 {played < MAX_QUESTIONS
                   ? `Question ${played + 1} of ${MAX_QUESTIONS}`
-                  : `End of quiz`}
+                  : `Quiz Complete`}
               </div>
             </div>
           )}
