@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import GameCard from "../components/GameCard";
 import { useNavigate } from "react-router-dom";
+import { fetchMoviesByRegion } from "../tmdbApi";
 
+// Static game cards as before
 const games = [
   {
     id: "actor-combo",
@@ -41,7 +43,7 @@ const games = [
   }
 ];
 
-// Modern dashboard styles
+// Modern dashboard styles (unchanged)
 const styles = {
   pageContainer: {
     maxWidth: 1084,
@@ -82,6 +84,17 @@ const styles = {
     flexDirection: "column",
     gap: 22
   },
+  movieRow: {
+    marginTop: 16,
+    marginLeft: -6,
+    marginBottom: 6,
+    display: "flex",
+    flexDirection: "row",
+    gap: 14,
+    overflowX: "auto",
+    paddingBottom: 3,
+    scrollbarWidth: "thin"
+  },
   dashTitle: {
     margin: "22px 0 4px",
     color: "#973caa",
@@ -96,15 +109,69 @@ const styles = {
     borderRadius: 6,
     margin: "8px 0 28px 4px",
     opacity: .53,
+  },
+  movieTitle: {
+    fontWeight: 700,
+    fontSize: "1.04rem"
   }
 };
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const [hollywoodMovies, setHollywoodMovies] = useState([]);
+  const [kollywoodMovies, setKollywoodMovies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errMsg, setErrMsg] = useState("");
+
   const sectioned = {
     Hollywood: games.filter(g => g.section === "Hollywood"),
     Kollywood: games.filter(g => g.section === "Kollywood")
   };
+
+  useEffect(() => {
+    let isActive = true;
+    setLoading(true);
+    setErrMsg("");
+    Promise.all([
+      fetchMoviesByRegion("US", { page: 1 }),
+      fetchMoviesByRegion("IN", { page: 1 })
+    ])
+      .then(([us, ind]) => {
+        if (!isActive) return;
+        setHollywoodMovies(us.results || []);
+        setKollywoodMovies(ind.results || []);
+      })
+      .catch((err) => {
+        if (!isActive) return;
+        setErrMsg("Unable to fetch movies. Please try again.");
+      })
+      .finally(() => {
+        if (isActive) setLoading(false);
+      });
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  // MovieCard renderer
+  function renderMovies(movies, region) {
+    const posterBase = "https://image.tmdb.org/t/p/w342";
+    return (
+      <div style={styles.movieRow}>
+        {movies.slice(0, 8).map((movie) => (
+          <GameCard
+            key={movie.id}
+            movie
+            poster={movie.poster_path ? posterBase + movie.poster_path : null}
+            title={movie.title}
+            year={movie.release_date ? String(movie.release_date).slice(0, 4) : ""}
+            description={movie.overview}
+            onClick={() => window.open(`https://www.themoviedb.org/movie/${movie.id}`, "_blank")}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="dashboard" style={styles.pageContainer}>
@@ -116,7 +183,7 @@ export default function DashboardPage() {
         <section style={styles.column} className="dashboard-column">
           <h2 style={styles.sectionHeader}>Hollywood</h2>
           <div style={styles.cardList}>
-            {sectioned.Hollywood.map(game => (
+            {sectioned.Hollywood.map((game) => (
               <GameCard
                 key={game.id}
                 name={game.name}
@@ -125,11 +192,19 @@ export default function DashboardPage() {
               />
             ))}
           </div>
+          <h3 style={{ ...styles.sectionHeader, fontSize: "1.07rem", color: "#973caa", marginTop: 28, marginBottom: 7, letterSpacing: ".008em", opacity: 0.95 }}>Now Trending</h3>
+          {loading ? (
+            <div style={{ margin: "22px 0 12px", color: "#a58cc2", fontWeight: 600 }}>Loading movies...</div>
+          ) : errMsg ? (
+            <div style={{ color: "#c75e77", margin: "10px 0" }}>{errMsg}</div>
+          ) : (
+            renderMovies(hollywoodMovies, "US")
+          )}
         </section>
         <section style={styles.column} className="dashboard-column">
           <h2 style={styles.sectionHeader}>Kollywood</h2>
           <div style={styles.cardList}>
-            {sectioned.Kollywood.map(game => (
+            {sectioned.Kollywood.map((game) => (
               <GameCard
                 key={game.id}
                 name={game.name}
@@ -138,6 +213,14 @@ export default function DashboardPage() {
               />
             ))}
           </div>
+          <h3 style={{ ...styles.sectionHeader, fontSize: "1.07rem", color: "#973caa", marginTop: 28, marginBottom: 7, letterSpacing: ".008em", opacity: 0.95 }}>Kollywood Picks</h3>
+          {loading ? (
+            <div style={{ margin: "22px 0 12px", color: "#a58cc2", fontWeight: 600 }}>Loading movies...</div>
+          ) : errMsg ? (
+            <div style={{ color: "#c75e77", margin: "10px 0" }}>{errMsg}</div>
+          ) : (
+            renderMovies(kollywoodMovies, "IN")
+          )}
         </section>
       </div>
     </div>
