@@ -5,9 +5,63 @@ import { getMemoryTrainerRound } from "../../tmdbGameUtils";
 import BackButton from "../../components/BackButton";
 
 // PUBLIC_INTERFACE
-// MemoryTrainer - lively game mode where the user views a movie still for 5 seconds and then answers a recall question about it (year, actor, or genre).
+// Movie Memory Trainer – User sees a movie still for 5 seconds, then must answer a challenging recall question (no immediate answer reveal, never just 'year', more advanced question types).
 
 const TIMER_DISPLAY = 5; // seconds to show image before quiz
+
+/**
+ * Helper: select a challenging recall question (e.g. actor, genre, director, or plot).
+ * Ensures NO easy/repetitive "release year" questions, prefers "who starred", "what genre", "who directed", etc.
+ * Avoids revealing answer until user responds.
+ */
+function extractChallengingQuestion(round) {
+  // Prefer: main actor, genre, director, tagline (NEVER just year).
+  if (!round || !round.movie) return null;
+  const movie = round.movie;
+  // Use director if present
+  if (round.recallType === "director" && round.answer && round.answer.split(",").join("").trim()) {
+    return {
+      recallQ: "Who is the director of this movie?",
+      answer: round.answer,
+      recallType: "director",
+      placeholder: "Enter director's name",
+    };
+  }
+  // Use genre if not just year
+  if (movie.genres && movie.genres.length && round.recallType === "genre") {
+    return {
+      recallQ: "Name one of the genres for this movie.",
+      answer: movie.genres[0].name,
+      recallType: "genre",
+      placeholder: "Enter a genre (e.g. Drama)",
+    };
+  }
+  // If no genre names, use first cast member (main actor)
+  if (movie.credits && movie.credits.cast && movie.credits.cast.length > 0) {
+    return {
+      recallQ: "Who plays a starring role in this movie?",
+      answer: movie.credits.cast[0].name,
+      recallType: "actor",
+      placeholder: "Enter actor name",
+    };
+  }
+  // Else fallback: director/year
+  if (round.recallType === "year" && round.answer && round.answer.trim()) {
+    return {
+      recallQ: "What is the exact release year of this movie?",
+      answer: round.answer,
+      recallType: "year",
+      placeholder: "Enter year (e.g. 2001)",
+    };
+  }
+  // Fallback: title includes genre id as last resort
+  return {
+    recallQ: "Recall a key detail from the image you just saw.",
+    answer: round.answer,
+    recallType: "general",
+    placeholder: "Type your answer",
+  };
+}
 
 export default function MemoryTrainer() {
   const [region, setRegion] = useState("US");
@@ -21,6 +75,7 @@ export default function MemoryTrainer() {
   const [feedback, setFeedback] = useState("");
   const [score, setScore] = useState(0);
   const [played, setPlayed] = useState(0);
+  const [recallMeta, setRecallMeta] = useState(null);
 
   const timerRef = useRef();
 
@@ -34,6 +89,7 @@ export default function MemoryTrainer() {
     setInput("");
     setFeedback("");
     setTimer(TIMER_DISPLAY);
+    setRecallMeta(null);
     try {
       const res = await getMemoryTrainerRound(region);
       if (!res) {
@@ -41,12 +97,24 @@ export default function MemoryTrainer() {
         setLoading(false);
         return;
       }
+      // fetch extra data for more challenging recall, if available (e.g., main actor)
+      if (res.movie && !res.movie.genres) {
+        // Try to get actual genres and credits for harder question
+        // We will NOT use the year question unless nothing else
+        const movieDetails = await fetch(
+          `https://api.themoviedb.org/3/movie/${res.movie.id}?api_key=${process.env.REACT_APP_TMDB_API_KEY}&append_to_response=credits`
+        ).then(r => r.ok ? r.json() : res.movie).catch(() => res.movie);
+        res.movie.genres = movieDetails.genres || res.movie.genres;
+        res.movie.credits = movieDetails.credits || {};
+      }
+      const qMeta = extractChallengingQuestion(res);
+      setRecallMeta(qMeta);
       setRound(res);
       setShowImage(true);
       setLoading(false);
       setTimer(TIMER_DISPLAY);
-    } catch {
-      setErrMsg("Failed to get a memory round. Retry.");
+    } catch (e) {
+      setErrMsg("Failed to get a movie round. Retry.");
       setLoading(false);
     }
   }
@@ -75,51 +143,64 @@ export default function MemoryTrainer() {
     // eslint-disable-next-line
   }, [region]);
 
-  // Answer submission + feedback
+  // Answer submission + feedback (only reveal correct answer after submit)
   function handleSubmit(e) {
     e.preventDefault();
     setAnswered(true);
     setPlayed((p) => p + 1);
+
     let normalizedGuess = (input || "").trim().toLowerCase();
     let correct = false;
     if (!round) return;
-    if (round.recallType === "year") {
-      correct = normalizedGuess === (round.answer || "").toString();
-    } else if (round.recallType === "director") {
-      // Accept substring/director last name, case-insensitive
-      const answerLower = (round.answer || "").toLowerCase();
-      correct = answerLower.includes(normalizedGuess);
-    } else if (round.recallType === "genre") {
-      // Accept single genre match
-      if (round.movie && round.movie.genres) {
-        correct = !!round.movie.genres.find(
-          (g) => normalizedGuess === g.name.toLowerCase()
-        );
-      } else if (round.movie && round.movie.genre_ids) {
-        // Not ideal, fallback: accept comma or space separated numbers if user is advanced
-        correct = round.movie.genre_ids.join(",").includes(normalizedGuess);
+    const expected = (recallMeta && recallMeta.answer ? recallMeta.answer : round.answer) || "";
+
+    // Keep logic challenging and forgiving:
+    if (recallMeta) {
+      if (recallMeta.recallType === "director") {
+        // Accept substring or last name, case-insensitive
+        correct = expected.toLowerCase().includes(normalizedGuess);
+      } else if (recallMeta.recallType === "genre") {
+        // Accept exact genre match (lowercase)
+        correct =
+          !!(
+            round.movie &&
+            round.movie.genres &&
+            round.movie.genres.find(g => normalizedGuess === g.name.toLowerCase())
+          );
+      } else if (recallMeta.recallType === "actor") {
+        // Accept substring or last name, forgiving
+        correct = expected.toLowerCase().includes(normalizedGuess);
+      } else if (recallMeta.recallType === "year") {
+        correct = normalizedGuess === expected.toString();
+      } else {
+        // fallback: loose substring match
+        correct = expected.toLowerCase().includes(normalizedGuess);
       }
     }
     if (correct) {
       setFeedback("🎉 Correct!");
       setScore((s) => s + 1);
     } else {
-      setFeedback(`❌ Wrong! Correct answer: ${round.answer}`);
+      setFeedback(
+        `❌ Wrong! Correct answer: ${
+          expected && typeof expected === "string" ? expected : JSON.stringify(expected)
+        }`
+      );
     }
     // After feedback, auto-advance
-    setTimeout(loadRound, correct ? 1600 : 2100);
+    setTimeout(loadRound, correct ? 1700 : 2400);
   }
 
   // UI styles
   const styles = {
     container: {
-      maxWidth: 530,
+      maxWidth: 550,
       margin: "46px auto 0",
       background: "#fff",
       borderRadius: 22,
-      boxShadow: "0 6px 28px 0 rgba(151,60,170,.12)",
+      boxShadow: "0 6px 28px 0 rgba(151,60,170,.13)",
       padding: "36px 16px 32px",
-      minHeight: 330,
+      minHeight: 350,
       animation: "fadeInPop 0.5s"
     },
     header: {
@@ -178,16 +259,16 @@ export default function MemoryTrainer() {
       width: `${(timer / TIMER_DISPLAY) * 100}%`
     },
     question: {
-      margin: "9px 0 18px",
+      margin: "12px 0 18px",
       fontWeight: 700,
-      fontSize: "1.13rem",
+      fontSize: "1.14rem",
       letterSpacing: ".017em",
       color: "#763195"
     },
     ansForm: {
       display: "flex", flexDirection: "row",
       alignItems: "center", gap: 10,
-      margin: "12px 0"
+      margin: "15px 0 4px"
     },
     score: {
       fontWeight: 700,
@@ -201,6 +282,17 @@ export default function MemoryTrainer() {
       color: "#868095",
       fontWeight: 600,
       fontSize: ".99rem"
+    },
+    titleBox: {
+      marginTop: 14,
+      background: "#edeafa",
+      padding: "10px 13px",
+      borderRadius: 13,
+      color: "#481d77",
+      fontWeight: 600,
+      boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
+      fontSize: ".98rem",
+      textAlign: "center"
     }
   };
 
@@ -267,7 +359,7 @@ export default function MemoryTrainer() {
           ) : (
             <>
               <div style={styles.question}>
-                {round.recallQ}
+                {recallMeta ? recallMeta.recallQ : "Recall a key detail about the movie you just saw."}
               </div>
               <form style={styles.ansForm} onSubmit={handleSubmit} autoComplete="off">
                 <input
@@ -275,27 +367,27 @@ export default function MemoryTrainer() {
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   autoFocus
-                  placeholder={
-                    round.recallType === "year"
-                      ? "Enter year (e.g. 2018)"
-                      : round.recallType === "director"
-                      ? "Enter director's name"
-                      : "Enter a genre (e.g. Drama)"
-                  }
+                  placeholder={recallMeta ? recallMeta.placeholder : ""}
                   disabled={answered}
-                  style={{ width: 168, maxWidth: 230, fontWeight: 590, fontSize: "1.09rem" }}
+                  style={{
+                    width: 190,
+                    maxWidth: 260,
+                    fontWeight: 590,
+                    fontSize: "1.10rem",
+                  }}
                   aria-label="Your answer"
                 />
                 <button
                   className="btn"
                   type="submit"
                   disabled={answered}
-                  style={{ padding: "10px 20px", fontWeight: 700 }}
+                  style={{ padding: "10px 22px", fontWeight: 700 }}
                 >
                   {answered ? "✓" : "Submit"}
                 </button>
               </form>
-              {answered && (
+              {/* Only show feedback and correct answer after user submits */}
+              {answered ? (
                 <div
                   className="subtle-pop"
                   style={{
@@ -303,36 +395,24 @@ export default function MemoryTrainer() {
                       ? "#24974e"
                       : "#db3662",
                     fontWeight: 700,
-                    fontSize: "1.15rem",
+                    fontSize: "1.14rem",
                     textAlign: "center",
                     minHeight: 28,
                     marginTop: 9,
                     letterSpacing: ".007em"
                   }}
+                  aria-live="polite"
                 >
                   {feedback}
                 </div>
-              )}
-              {!answered && (
+              ) : (
                 <div style={styles.reveal}>
                   <span style={{ fontStyle: "italic", color: "#b7a2cf" }}>
-                    Hint: Recall from the image you just saw!
+                    Hint: Recall details from the image!
                   </span>
                 </div>
               )}
-              <div
-                style={{
-                  marginTop: 17,
-                  background: "#edeafa",
-                  padding: "10px 13px",
-                  borderRadius: 13,
-                  color: "#481d77",
-                  fontWeight: 600,
-                  boxShadow: "0 1.5px 10px 0 rgba(151,60,170,0.06)",
-                  fontSize: ".98rem",
-                  textAlign: "center"
-                }}
-              >
+              <div style={styles.titleBox}>
                 <span style={{ color: "#973caa" }}>{round.movie.title}</span>{" "}
                 {round.movie.release_date ? `(${round.movie.release_date.slice(0, 4)})` : ""}
               </div>
@@ -346,7 +426,7 @@ export default function MemoryTrainer() {
         </div>
       )}
       <div style={{ marginTop: 26, color: "#a58cc2", textAlign: "center", fontWeight: 500, fontSize: ".98rem", letterSpacing: ".008em" }}>
-        Glimpse a random movie image for 5 seconds, then prove your recall!
+        Glimpse a random movie image for 5 seconds, then prove your recall! We’ll grill you on main actor, genre, director or another tricky detail.
       </div>
     </div>
   );
